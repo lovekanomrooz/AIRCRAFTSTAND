@@ -2,201 +2,213 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>ระบบจัดสรรหลุมจอด (MARS Compatible)</title>
+    <title>Aircraft Stand Planner Pro</title>
     <style>
-        :root { --accent: #ff4757; --bg: #1e272e; --panel: #2f3542; --success: #2ed573; --disabled: #57606f; }
-        body { margin: 0; display: flex; height: 100vh; font-family: 'Sarabun', sans-serif; background: var(--bg); color: white; }
+        :root { --bg: #1e1e1e; --panel: #2d2d2d; --safe: #2ecc71; --danger: #e74c3c; }
+        body { margin: 0; display: flex; height: 100vh; font-family: 'Sarabun', sans-serif; background: var(--bg); color: white; overflow: hidden; }
         
-        #sidebar { width: 420px; background: var(--panel); padding: 20px; border-right: 2px solid #000; overflow-y: auto; }
-        #viewport { flex-grow: 1; overflow: auto; background: #000; position: relative; }
+        #sidebar { width: 280px; background: var(--panel); padding: 20px; border-right: 2px solid #000; }
+        .ac-item { background: #4b6584; padding: 12px; margin: 8px 0; border-radius: 6px; cursor: grab; text-align: center; }
+
+        #viewport { flex-grow: 1; overflow: auto; background: #111; position: relative; }
+        svg { background: #222; min-width: 5000px; height: 1000px; }
+
+        .headerline { stroke: white; stroke-width: 3; }
+        .t-mark { fill: #f1c40f; r: 5; cursor: pointer; }
+        .t-mark:hover { r: 8; fill: #fff; }
+        .t-text { fill: #f1c40f; font-size: 10px; }
+
+        .stand-box { fill: rgba(255,255,255,0.02); stroke: #444; }
+        .swing-path { fill: none; stroke-width: 2.5; marker-end: url(#arrow); }
+        .safe { stroke: var(--safe); }
+        .unsafe { stroke: var(--danger); }
         
-        svg { background: #222; min-width: 4000px; height: 100%; }
+        .ac-group { cursor: move; }
+        .ac-body { fill: #fff; stroke: #333; }
+        .ac-wing { fill: #bdc3c7; }
         
-        .stand-ctrl { background: #3e4451; padding: 12px; margin-bottom: 10px; border-radius: 8px; border-left: 5px solid #747d8c; }
-        .stand-ctrl.active { border-left-color: var(--success); }
-        .stand-ctrl.blocked { opacity: 0.3; pointer-events: none; background: #222; border-left-color: #ff0000; }
-        
-        select { width: 100%; padding: 8px; margin-top: 5px; border-radius: 4px; border: none; background: #57606f; color: white; cursor: pointer; }
-        
-        .stand-box { fill: #2c3e50; stroke: #555; stroke-width: 1; }
-        .stand-parent { stroke: #f1c40f; stroke-width: 2; stroke-dasharray: 10,5; fill: rgba(241, 196, 15, 0.05); }
-        .ac-model { fill: #fff; stroke: #333; }
-        .swing-path { fill: rgba(255, 71, 87, 0.1); stroke: var(--accent); stroke-width: 2; stroke-dasharray: 8; }
-        .collision { stroke: #ff0000 !important; stroke-width: 4 !important; fill: rgba(255, 0, 0, 0.3) !important; }
-        
-        .audit-card { background: #fff; color: #2f3542; padding: 15px; border-radius: 8px; margin-top: 15px; font-size: 0.85em; border-top: 5px solid var(--accent); }
-        .formula { font-family: 'Courier New', monospace; background: #dfe4ea; padding: 8px; border-radius: 4px; display: block; margin: 8px 0; color: #c0392b; font-weight: bold; }
-        .warn { color: #e74c3c; font-weight: bold; }
+        #info-box { position: absolute; top: 10px; left: 300px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; font-size: 12px; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <h2 style="color: var(--success)">✈️ Stand Planner</h2>
-    <p id="status">กำลังเชื่อมต่อข้อมูล...</p>
-    <div id="controls"></div>
-    <div id="audit-logs"></div>
+    <h3>คลังเครื่องบิน</h3>
+    <div id="aircraft-list"></div>
+    <hr>
+    <p style="font-size: 0.8em; color: #aaa;">
+        * ลากเครื่องบินไปวางที่จุด T1 หรือ T2<br>
+        * คลิกที่เครื่องเพื่อเปิด/ปิดรัศมี<br>
+        * ดับเบิลคลิกเพื่อลบ
+    </p>
 </div>
 
 <div id="viewport">
+    <div id="info-box">สถานะ: พร้อมใช้งาน</div>
     <svg id="apron-svg">
-        <g id="draw-layer"></g>
+        <defs>
+            <marker id="arrow-safe" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2ecc71"/></marker>
+            <marker id="arrow-danger" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#e74c3c"/></marker>
+        </defs>
+        <g id="main-layer"></g>
     </svg>
 </div>
 
 <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbx5apqROG0s7dmeu5vhyyvPSvmPrg9GWaBtQ4paa4nYwGbshW4TRmnCFDmryLJEBpDL/exec";
     let db = { aircrafts: [], stands: [] };
-    let allocations = {}; // { StandID: { model: "None", direction: "Right" } }
-    const SCALE = 4;
+    let allocations = []; // [{ standId, model, tMark: 'T1', showLeft: true, showRight: true }]
+    const SCALE = 4; // 1m = 4px
+    const HEADER_Y = 100;
 
     async function init() {
         try {
             const res = await fetch(API_URL);
             db = await res.json();
-            document.getElementById('status').innerHTML = "🟢 เชื่อมต่อข้อมูล GS สำเร็จ";
             
-            const ctrl = document.getElementById('controls');
-            db.stands.forEach(st => {
-                allocations[st.StandID] = { model: "None", direction: "Right" };
-                ctrl.innerHTML += `
-                    <div id="ctrl-${st.StandID}" class="stand-ctrl">
-                        <label><strong>${st.StandID}</strong> (Max: ${st.MaxCode} | กว้าง: ${st.Width}ม.)</label>
-                        <select onchange="updateStand('${st.StandID}', this.value, 'model')">
-                            <option value="None">-- ว่าง --</option>
-                            ${db.aircrafts.map(ac => `<option value="${ac.Model}">${ac.Model}</option>`).join('')}
-                        </select>
-                        <select onchange="updateStand('${st.StandID}', this.value, 'direction')" style="font-size: 0.8em; margin-top:3px; background:#2f3542;">
-                            <option value="Right">เลี้ยวขวา (Swing Right)</option>
-                            <option value="Left">เลี้ยวซ้าย (Swing Left)</option>
-                        </select>
-                    </div>
-                `;
+            const list = document.getElementById('aircraft-list');
+            db.aircrafts.forEach(ac => {
+                const div = document.createElement('div');
+                div.className = 'ac-item';
+                div.draggable = true;
+                div.innerText = ac.Model;
+                div.ondragstart = (e) => e.dataTransfer.setData("text", ac.Model);
+                list.appendChild(div);
             });
             draw();
-        } catch (e) { document.getElementById('status').innerHTML = "🔴 เชื่อมต่อผิดพลาด"; }
-    }
-
-    function updateStand(id, val, type) {
-        allocations[id][type] = val;
-        handleMARSConflict(id);
-        draw();
-    }
-
-    // ฟังก์ชันจัดการ Conflict ระหว่างหลุม Parent และ Child
-    function handleMARSConflict(changedId) {
-        const stand = db.stands.find(s => s.StandID === changedId);
-        const model = allocations[changedId].model;
-
-        db.stands.forEach(s => {
-            const ctrl = document.getElementById(`ctrl-${s.StandID}`);
-            
-            // กรณีเปลี่ยนหลุม Parent (เช่น 4)
-            if (s.ParentID === changedId) {
-                if (model !== "None") {
-                    ctrl.classList.add('blocked');
-                    allocations[s.StandID].model = "None";
-                } else {
-                    ctrl.classList.remove('blocked');
-                }
-            }
-            
-            // กรณีเปลี่ยนหลุม Child (เช่น 4L)
-            if (s.StandID === stand.ParentID) {
-                const siblingsUsed = db.stands.some(sib => sib.ParentID === stand.ParentID && allocations[sib.StandID].model !== "None");
-                if (siblingsUsed) {
-                    ctrl.classList.add('blocked');
-                    allocations[s.StandID].model = "None";
-                } else {
-                    ctrl.classList.remove('blocked');
-                }
-            }
-        });
+        } catch (e) { console.error(e); }
     }
 
     function draw() {
-        const layer = document.getElementById('draw-layer');
+        const layer = document.getElementById('main-layer');
         layer.innerHTML = '';
-        const centerY = 400;
-        let auditHTML = "<h3>🔍 ผลการคำนวณ</h3>";
-        
-        // เราต้องวาดโดยเรียงตามพิกัด X จริง
-        let currentX = 50;
+        let xPosMap = {};
+        let currentX = 100;
 
-        db.stands.forEach((stand, idx) => {
-            const alloc = allocations[stand.StandID];
-            const ac = db.aircrafts.find(a => a.Model === alloc.model);
+        // 1. วาด Stands และ T-Marks
+        db.stands.forEach(st => {
+            const standW = st.Width * SCALE;
+            const standL = st.Length * SCALE;
             
-            // จัดการพื้นที่ของหลุม MARS: 4L และ 4R ต้องอยู่ใต้พื้นที่ของ 4
-            // แต่เพื่อความง่ายในการแสดงผล เราจะวาดเรียงตามรายการในชีท
-            const standW = stand.Width * SCALE;
-            const standL = stand.Length * SCALE;
-            const centerX = currentX + (standW / 2);
-
-            // วาดหลุมจอด
-            layer.innerHTML += `
-                <rect x="${currentX}" y="${centerY - standL}" width="${standW}" height="${standL}" 
-                      class="stand-box ${stand.ParentID ? '' : 'stand-parent'}" />
-                <text x="${centerX}" y="${centerY + 30}" fill="#aaa" text-anchor="middle" font-size="12">${stand.StandID}</text>
-            `;
-
-            if (ac) {
-                const isLeft = alloc.direction === "Left";
-                const pivotOffset = ac.PivotOffset * SCALE;
-                const sweepR = ac.SweepRadius * SCALE;
-                const pivotX = isLeft ? centerX + pivotOffset : centerX - pivotOffset;
-
-                // ตรวจสอบการชนกับลำข้างเคียง
-                let collision = false;
-                const neighborIdx = isLeft ? idx - 1 : idx + 1;
-                const neighbor = db.stands[neighborIdx];
-                
-                if (neighbor) {
-                    const nAc = db.aircrafts.find(a => a.Model === allocations[neighbor.StandID].model);
-                    if (nAc) {
-                        const reach = ac.PivotOffset + ac.SweepRadius;
-                        const gapToCenter = (stand.Width / 2) + (neighbor.Width / 2);
-                        if (reach + (nAc.Span / 2) > gapToCenter) collision = true;
-                    }
-                }
-
-                // วาดเส้นรัศมีการเลี้ยว
-                layer.innerHTML += `
-                    <path d="M ${pivotX + (isLeft ? -sweepR : sweepR)} ${centerY-10} A ${sweepR} ${sweepR} 0 0 ${isLeft?0:1} ${pivotX + (isLeft ? sweepR : -sweepR)} ${centerY-10}" 
-                          class="swing-path ${collision ? 'collision' : ''}" fill="none" />
-                `;
-
-                // วาดเครื่องบิน
-                drawAC(layer, centerX, centerY, ac);
-
-                // บันทึก Audit
-                auditHTML += `
-                    <div class="audit-card">
-                        <b>📍 ${stand.StandID}: ${ac.Model}</b> (เลี้ยว${isLeft ? 'ซ้าย' : 'ขวา'})
-                        <span class="formula">รัศมีกวาด = Pivot(${ac.PivotOffset}m) + Sweep(${ac.SweepRadius}m) = ${(ac.PivotOffset + ac.SweepRadius).toFixed(2)}ม.</span>
-                        สถานะ: ${collision ? '<span class="warn">❌ ตรวจพบการชนเครื่องข้างๆ</span>' : '<span style="color:green">✅ ระยะปลอดภัยผ่าน</span>'}
-                    </div>
-                `;
+            let centerX;
+            if (st.ParentID) {
+                centerX = xPosMap[st.ParentID] + (st.OffsetX * SCALE);
+            } else {
+                centerX = currentX + (standW / 2);
+                xPosMap[st.StandID] = centerX;
             }
+            xPosMap[st.StandID] = centerX;
 
-            // เงื่อนไขการขยับ X: หลุมย่อย (Child) จะไม่ขยับ X มากเท่าหลุมปกติ เพราะมันแชร์พื้นที่กัน
-            // แต่ในโค้ดนี้เพื่อให้ดูง่าย ผมจะให้มันเรียงต่อกันไปก่อน ถ้าคุณต้องการให้ 4L/4R ซ้อนใน 4 จริงๆ ต้องปรับ Logic Coordinate อีกนิดครับ
-            currentX += standW; 
+            // พื้นที่หลุม
+            layer.innerHTML += `<rect x="${centerX - standW/2}" y="${HEADER_Y}" width="${standW}" height="${standL}" class="stand-box" ondragover="event.preventDefault()" />`;
+            layer.innerHTML += `<line x1="${centerX - standW/2}" y1="${HEADER_Y}" x2="${centerX + standW/2}" y2="${HEADER_Y}" class="headerline" />`;
+            
+            // T-Marks
+            const t1Y = HEADER_Y + (12.5 * SCALE);
+            const t2Y = HEADER_Y + (30.0 * SCALE);
+            drawTMark(layer, centerX, t1Y, "T1", st.StandID);
+            drawTMark(layer, centerX, t2Y, "T2", st.StandID);
+            
+            layer.innerHTML += `<text x="${centerX}" y="${HEADER_Y + standL + 20}" fill="#888" text-anchor="middle">${st.StandID}</text>`;
+            if (!st.ParentID) currentX += standW + (2 * SCALE);
         });
 
-        document.getElementById('audit-logs').innerHTML = auditHTML;
+        // 2. วาดเครื่องบิน
+        allocations.forEach((alloc, idx) => {
+            const ac = db.aircrafts.find(a => a.Model === alloc.model);
+            const stand = db.stands.find(s => s.StandID === alloc.standId);
+            const centerX = xPosMap[alloc.standId];
+            const noseY = HEADER_Y + (alloc.tMark === 'T1' ? 12.5 : 30) * SCALE;
+            const pivotY = noseY + (ac.NoseToPivot * SCALE);
+            
+            // Check Conflict
+            const isLConflict = checkConflict(alloc, 'Left', xPosMap);
+            const isRConflict = checkConflict(alloc, 'Right', xPosMap);
+
+            // Draw Swing Arcs
+            if (alloc.showLeft) drawSwingArc(layer, centerX, pivotY, ac, true, isLConflict);
+            if (alloc.showRight) drawSwingArc(layer, centerX, pivotY, ac, false, isRConflict);
+
+            // Draw Aircraft
+            const acGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            acGroup.setAttribute("class", "ac-group");
+            acGroup.setAttribute("transform", `translate(${centerX}, ${noseY})`);
+            acGroup.onclick = () => { toggleSwing(idx); draw(); };
+            acGroup.ondblclick = () => { allocations.splice(idx, 1); draw(); };
+
+            acGroup.innerHTML = `
+                <path d="M 0,${ac.NoseToPivot * SCALE} L ${-ac.Span*SCALE/2},${(ac.NoseToPivot+2)*SCALE} L ${ac.Span*SCALE/2},${(ac.NoseToPivot+2)*SCALE} Z" class="ac-wing" />
+                <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" class="ac-body" />
+                <circle cx="0" cy="0" r="3" fill="red" /> <!-- Nose Gear Pos -->
+                <text y="-5" fill="yellow" text-anchor="middle" font-size="10">${ac.Model}</text>
+            `;
+            layer.appendChild(acGroup);
+        });
     }
 
-    function drawAC(layer, cx, cy, ac) {
-        const s = SCALE;
-        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-        g.setAttribute("transform", `translate(${cx}, ${cy - (ac.Length*s/2)})`);
-        g.innerHTML = `
-            <path d="M 0,${-ac.Length*s/4} L ${-ac.Span*s/2},${ac.Length*s/8} L ${ac.Span*s/2},${ac.Length*s/8} Z" fill="#ced6e0" stroke="#333" />
-            <rect x="${-ac.Span*s/16}" y="${-ac.Length*s/2}" width="${ac.Span*s/8}" height="${ac.Length*s}" rx="8" fill="#fff" stroke="#333" />
-            <text y="${-ac.Length*s/2 - 10}" fill="yellow" font-size="11" text-anchor="middle">${ac.Model}</text>
-        `;
-        layer.appendChild(g);
+    function drawTMark(layer, x, y, label, standId) {
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", x); circle.setAttribute("cy", y);
+        circle.setAttribute("class", "t-mark");
+        circle.ondrop = (e) => dropAC(e, standId, label);
+        layer.appendChild(circle);
+        layer.innerHTML += `<text x="${x+10}" y="${y+4}" class="t-text">${label}</text>`;
+    }
+
+    function drawSwingArc(layer, cx, py, ac, isLeft, isConflict) {
+        const r = ac.SweepRadius * SCALE;
+        const pOffset = ac.PivotOffset * SCALE;
+        const pivotX = isLeft ? cx + pOffset : cx - pOffset;
+        const colorClass = isConflict ? 'unsafe' : 'safe';
+        const marker = isConflict ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
+
+        // วาดจากแนวปีก (ด้านล่าง) โค้งไปด้านหน้า (ด้านบน)
+        // A rx ry x-axis-rotation large-arc-flag sweep-flag x y
+        const startX = pivotX + (isLeft ? -r : r);
+        const endX = pivotX;
+        const endY = py - r;
+
+        const pathData = `M ${startX} ${py} A ${r} ${r} 0 0 ${isLeft ? 1 : 0} ${endX} ${endY}`;
+        
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", pathData);
+        path.setAttribute("class", `swing-path ${colorClass}`);
+        path.setAttribute("style", `marker-end: ${marker}`);
+        layer.appendChild(path);
+    }
+
+    function checkConflict(alloc, side, xPosMap) {
+        const ac = db.aircrafts.find(a => a.Model === alloc.model);
+        const myX = xPosMap[alloc.standId];
+        const reach = ac.PivotOffset + ac.SweepRadius;
+
+        return allocations.some(other => {
+            if (other === alloc) return false;
+            const otherAc = db.aircrafts.find(a => a.Model === other.model);
+            const otherX = xPosMap[other.standId];
+            const dist = Math.abs(myX - otherX) / SCALE;
+            
+            // ถ้าเลี้ยวไปทางนั้น แล้วระยะเหวี่ยง + ครึ่งปีกเครื่องข้างๆ > ระยะห่าง Centerline = ชน
+            const isToward = (side === 'Left' && otherX < myX) || (side === 'Right' && otherX > myX);
+            if (isToward && (reach + (otherAc.Span / 2) > dist)) return true;
+            return false;
+        });
+    }
+
+    function dropAC(e, standId, tMark) {
+        e.preventDefault();
+        const model = e.dataTransfer.getData("text");
+        // ลบของเก่าในหลุมเดียวกันออกก่อน (ถ้ามี)
+        allocations = allocations.filter(a => a.standId !== standId);
+        allocations.push({ standId, model, tMark, showLeft: true, showRight: true });
+        draw();
+    }
+
+    function toggleSwing(idx) {
+        const a = allocations[idx];
+        if (a.showLeft && a.showRight) a.showRight = false;
+        else if (a.showLeft && !a.showRight) { a.showLeft = false; a.showRight = true; }
+        else if (!a.showLeft && a.showRight) { a.showLeft = true; a.showRight = true; }
     }
 
     init();
