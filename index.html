@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aircraft Stand Allocation & Swing-out Safety System</title>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #34495e;
+            --accent: #e67e22;
+            --success: #27ae60;
+            --danger: #c0392b;
+            --text-light: #ecf0f1;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: grid;
+            grid-template-columns: 320px 1fr 350px;
+            height: 100vh;
+            background: #1a1a1a;
+            color: var(--text-light);
+        }
+
+        /* Sidebar Style */
+        .sidebar {
+            background: var(--primary);
+            padding: 20px;
+            border-right: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        h2, h3 { margin-top: 0; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 5px; }
+
+        .control-group { display: flex; flex-direction: column; gap: 8px; }
+        select, button {
+            padding: 12px;
+            border-radius: 6px;
+            border: none;
+            font-size: 1rem;
+        }
+        button {
+            background: var(--accent);
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        button:hover { background: #d35400; }
+
+        /* Main Viewport (Apron) */
+        .viewport {
+            position: relative;
+            background: #222;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        svg {
+            width: 95%;
+            height: 95%;
+            background: #333;
+            border: 2px solid #555;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        /* Audit Panel */
+        .audit-panel {
+            background: white;
+            color: #333;
+            padding: 20px;
+            overflow-y: auto;
+            border-left: 5px solid var(--accent);
+        }
+
+        .formula-box {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', Courier, monospace;
+            margin-bottom: 15px;
+        }
+
+        .result-highlight {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: var(--danger);
+            text-align: center;
+            border: 2px dashed var(--danger);
+            padding: 10px;
+        }
+
+        /* Aircraft Visualization */
+        .ac-rect { fill: rgba(52, 152, 219, 0.6); stroke: #2980b9; stroke-width: 2; }
+        .swing-path { fill: rgba(231, 76, 60, 0.1); stroke: var(--danger); stroke-dasharray: 5; }
+        .safety-line { stroke: var(--success); stroke-width: 2; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. Control Sidebar -->
+    <div class="sidebar">
+        <h2>✈️ Allocation</h2>
+        
+        <div class="control-group">
+            <label>Select Aircraft (from Google Sheets)</label>
+            <select id="ac-select" onchange="previewCalc()"></select>
+        </div>
+
+        <div class="control-group">
+            <label>Select Stand</label>
+            <select id="stand-select" onchange="previewCalc()"></select>
+        </div>
+
+        <div class="control-group" style="margin-top: auto;">
+            <p style="font-size: 0.8em; color: #bdc3c7;">Status: <span id="status">Connecting to GS...</span></p>
+            <button onclick="runCalculation()">APPLY ALLOCATION</button>
+        </div>
+    </div>
+
+    <!-- 2. Apron Visualization -->
+    <div class="viewport">
+        <svg id="apron-svg" viewBox="0 0 600 600">
+            <!-- Grid Lines -->
+            <defs>
+                <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+                    <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#444" stroke-width="1"/>
+                </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#grid)" />
+            
+            <!-- Dynamic Content Layer -->
+            <g id="draw-layer"></g>
+        </svg>
+    </div>
+
+    <!-- 3. Audit & Verification Panel -->
+    <div class="audit-panel">
+        <h3>🔍 Safety Audit Log</h3>
+        <div id="audit-content">
+            <p>Please select an aircraft and stand to begin calculation.</p>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const API_URL = "https://script.google.com/macros/s/AKfycbx5apqROG0s7dmeu5vhyyvPSvmPrg9GWaBtQ4paa4nYwGbshW4TRmnCFDmryLJEBpDL/exec"; 
+        let db = { aircrafts: [], stands: [] };
+
+        // --- INITIALIZATION ---
+        async function init() {
+            try {
+                const response = await fetch(API_URL);
+                db = await response.json();
+                populateDropdowns();
+                document.getElementById('status').innerText = "Connected ✅";
+                document.getElementById('status').style.color = "var(--success)";
+            } catch (error) {
+                console.error(error);
+                document.getElementById('status').innerText = "Connection Failed ❌";
+                // ข้อมูลสำรองเผื่อต่อ API ไม่ได้
+                db = {
+                    aircrafts: [{Model:"A320", Span:35.8, Length:37.6, Code:"C"}, {Model:"B777", Span:64.8, Length:73.9, Code:"E"}],
+                    stands: [{StandID:"G01", X:300, Y:300, MaxCode:"E"}]
+                };
+                populateDropdowns();
+            }
+        }
+
+        function populateDropdowns() {
+            const acSelect = document.getElementById('ac-select');
+            const stSelect = document.getElementById('stand-select');
+            
+            db.aircrafts.forEach(ac => acSelect.innerHTML += `<option value="${ac.Model}">${ac.Model} (Span ${ac.Span}m)</option>`);
+            db.stands.forEach(st => stSelect.innerHTML += `<option value="${st.StandID}">${st.StandID} (Max ${st.MaxCode})</option>`);
+        }
+
+        // --- CALCULATION LOGIC ---
+        function previewCalc() {
+            const ac = db.aircrafts.find(a => a.Model === document.getElementById('ac-select').value);
+            const stand = db.stands.find(s => s.StandID === document.getElementById('stand-select').value);
+            
+            if (!ac || !stand) return;
+
+            // 1. กำหนดระยะปลอดภัย ICAO Annex 14
+            let margin = 4.5; // Default for Code C
+            if (ac.Code === 'D' || ac.Code === 'E') margin = 7.5;
+            if (ac.Code === 'F') margin = 7.5;
+
+            // 2. คำนวณ Swing-out Radius (Simplified)
+            // รัศมีการกวาด = ครึ่งหนึ่งของ Wingspan + ระยะปลอดภัย
+            const swingRadius = (ac.Span / 2) + margin;
+
+            updateSVG(ac, stand, swingRadius, margin);
+            updateAudit(ac, stand, swingRadius, margin);
+        }
+
+        function updateSVG(ac, stand, radius, margin) {
+            const layer = document.getElementById('draw-layer');
+            const scale = 5; // 1 meter = 5 pixels
+            
+            const rPx = radius * scale;
+            const spanPx = ac.Span * scale;
+            const lenPx = ac.Length * scale;
+
+            layer.innerHTML = `
+                <!-- Swing-out Zone -->
+                <circle cx="${stand.X}" cy="${stand.Y}" r="${rPx}" class="swing-path" />
+                
+                <!-- Aircraft Model (Box Representation) -->
+                <rect x="${stand.X - (lenPx/2)}" y="${stand.Y - (spanPx/2)}" 
+                      width="${lenPx}" height="${spanPx}" class="ac-rect" 
+                      transform="rotate(0, ${stand.X}, ${stand.Y})" />
+
+                <!-- Stand Center Point -->
+                <circle cx="${stand.X}" cy="${stand.Y}" r="5" fill="red" />
+                
+                <!-- Dimension Text -->
+                <text x="${stand.X}" y="${stand.Y - rPx - 10}" fill="white" font-size="12" text-anchor="middle">
+                    Safety Boundary: ${radius.toFixed(2)}m
+                </text>
+            `;
+        }
+
+        function updateAudit(ac, stand, radius, margin) {
+            const content = document.getElementById('audit-content');
+            const isSafe = (ac.Code <= stand.MaxCode);
+
+            content.innerHTML = `
+                <div class="formula-box">
+                    <strong>1. ICAO Separation Rules:</strong><br>
+                    Code ${ac.Code} requires <b>${margin}m</b> clearance.
+                </div>
+
+                <div class="formula-box">
+                    <strong>2. Swing-out Geometry:</strong><br>
+                    Formula: (Span / 2) + Margin<br>
+                    Calc: (${ac.Span} / 2) + ${margin} = <b>${radius.toFixed(2)}m</b>
+                </div>
+
+                <div class="formula-box">
+                    <strong>3. Stand Capability:</strong><br>
+                    Stand Max Code: ${stand.MaxCode}<br>
+                    Aircraft Code: ${ac.Code}<br>
+                    Status: ${isSafe ? '<b style="color:green">PASS</b>' : '<b style="color:red">FAIL</b>'}
+                </div>
+
+                <div class="result-highlight">
+                    REQUIRED RADIUS<br>
+                    ${radius.toFixed(2)} METERS
+                </div>
+                
+                <p style="font-size:0.8em; color:#666; margin-top:20px;">
+                    *หมายเหตุ: การคำนวณนี้อ้างอิงจุดหมุนกึ่งกลางลำตัว หากเป็นการเลี้ยวแบบ Swing-out โดยใช้ล้อหลักเป็นจุดหมุน รัศมีจะเพิ่มขึ้นตามระยะฐานล้อ
+                </p>
+            `;
+        }
+
+        function runCalculation() {
+            alert("Allocation Data Saved to System!");
+            // ที่นี่คุณสามารถเพิ่ม fetch(POST) เพื่อส่งข้อมูลกลับไปบันทึกใน Google Sheets ได้
+        }
+
+        init();
+    </script>
+</body>
+</html>
