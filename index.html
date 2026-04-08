@@ -2,49 +2,54 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>Aircraft Stand Planner Pro</title>
+    <title>ระบบคำนวณหลุมจอดมาตรฐาน (Advanced Planner)</title>
     <style>
-        :root { --bg: #1e1e1e; --panel: #2d2d2d; --safe: #2ecc71; --danger: #e74c3c; }
+        :root { --safe: #2ecc71; --danger: #e74c3c; --accent: #f1c40f; --bg: #121212; }
         body { margin: 0; display: flex; height: 100vh; font-family: 'Sarabun', sans-serif; background: var(--bg); color: white; overflow: hidden; }
         
-        #sidebar { width: 280px; background: var(--panel); padding: 20px; border-right: 2px solid #000; }
-        .ac-item { background: #4b6584; padding: 12px; margin: 8px 0; border-radius: 6px; cursor: grab; text-align: center; }
+        /* Sidebar */
+        #sidebar { width: 300px; background: #222; padding: 20px; border-right: 2px solid #000; overflow-y: auto; }
+        .ac-item { background: #34495e; padding: 12px; margin: 8px 0; border-radius: 6px; cursor: grab; text-align: center; border: 1px solid transparent; }
+        .ac-item:hover { background: #5d6d7e; border-color: white; }
 
+        /* Viewport */
         #viewport { flex-grow: 1; overflow: auto; background: #111; position: relative; }
-        svg { background: #222; min-width: 5000px; height: 1000px; }
+        svg { background: #1a1a1a; min-width: 5000px; height: 100%; }
 
-        .headerline { stroke: white; stroke-width: 3; }
-        .t-mark { fill: #f1c40f; r: 5; cursor: pointer; }
-        .t-mark:hover { r: 8; fill: #fff; }
-        .t-text { fill: #f1c40f; font-size: 10px; }
-
-        .stand-box { fill: rgba(255,255,255,0.02); stroke: #444; }
-        .swing-path { fill: none; stroke-width: 2.5; marker-end: url(#arrow); }
+        /* SVG Components */
+        .headerline { stroke: white; stroke-width: 4; }
+        .t-mark { fill: var(--accent); cursor: pointer; transition: 0.2s; }
+        .t-mark:hover { fill: #fff; r: 10; }
+        .t-text { fill: var(--accent); font-size: 11px; font-weight: bold; }
+        
+        .stand-box { fill: rgba(255,255,255,0.02); stroke: #444; stroke-width: 1; }
+        .stand-parent { stroke: #f1c40f; stroke-dasharray: 8,4; stroke-width: 1.5; }
+        
+        .swing-path { fill: none; stroke-width: 3; }
         .safe { stroke: var(--safe); }
         .unsafe { stroke: var(--danger); }
         
-        .ac-group { cursor: move; }
-        .ac-body { fill: #fff; stroke: #333; }
+        .ac-body { fill: #fff; stroke: #333; cursor: move; }
         .ac-wing { fill: #bdc3c7; }
-        
-        #info-box { position: absolute; top: 10px; left: 300px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; font-size: 12px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <h3>คลังเครื่องบิน</h3>
-    <div id="aircraft-list"></div>
-    <hr>
-    <p style="font-size: 0.8em; color: #aaa;">
-        * ลากเครื่องบินไปวางที่จุด T1 หรือ T2<br>
-        * คลิกที่เครื่องเพื่อเปิด/ปิดรัศมี<br>
-        * ดับเบิลคลิกเพื่อลบ
-    </p>
+    <h3 style="color: var(--safe)">✈️ คลังเครื่องบิน</h3>
+    <div id="aircraft-list">โหลดข้อมูลเครื่องบิน...</div>
+    <hr style="border: 0.5px solid #444; margin: 20px 0;">
+    <div style="font-size: 0.8em; color: #aaa; line-height: 1.6;">
+        <b>คู่มือ:</b><br>
+        1. ลากเครื่องบินไปวางที่จุด <span style="color:var(--accent)">●</span> T1 หรือ T2<br>
+        2. คลิกที่ตัวเครื่องเพื่อเปลี่ยนโหมดเลี้ยว (ซ้าย/ขวา/ทั้งคู่)<br>
+        3. ดับเบิลคลิกเพื่อลบเครื่องบินออก
+    </div>
 </div>
 
 <div id="viewport">
-    <div id="info-box">สถานะ: พร้อมใช้งาน</div>
+    <div id="status" style="position: absolute; top:10px; left:20px; font-size:12px;">🛰️ กำลังเชื่อมต่อ GS...</div>
     <svg id="apron-svg">
         <defs>
             <marker id="arrow-safe" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2ecc71"/></marker>
@@ -55,28 +60,37 @@
 </div>
 
 <script>
+    // *** เปลี่ยน URL ของคุณที่นี่ ***
     const API_URL = "https://script.google.com/macros/s/AKfycbx5apqROG0s7dmeu5vhyyvPSvmPrg9GWaBtQ4paa4nYwGbshW4TRmnCFDmryLJEBpDL/exec";
+
     let db = { aircrafts: [], stands: [] };
-    let allocations = []; // [{ standId, model, tMark: 'T1', showLeft: true, showRight: true }]
-    const SCALE = 4; // 1m = 4px
-    const HEADER_Y = 100;
+    let allocations = []; // { standId, model, tMark, mode: 0 } 
+    const SCALE = 4; // 1 เมตร = 4 พิกเซล
+    const HEADER_Y = 150;
 
     async function init() {
         try {
             const res = await fetch(API_URL);
             db = await res.json();
-            
-            const list = document.getElementById('aircraft-list');
-            db.aircrafts.forEach(ac => {
-                const div = document.createElement('div');
-                div.className = 'ac-item';
-                div.draggable = true;
-                div.innerText = ac.Model;
-                div.ondragstart = (e) => e.dataTransfer.setData("text", ac.Model);
-                list.appendChild(div);
-            });
+            document.getElementById('status').innerHTML = "🟢 ฐานข้อมูลออนไลน์";
+            renderList();
             draw();
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            document.getElementById('status').innerHTML = "🔴 เชื่อมต่อล้มเหลว";
+        }
+    }
+
+    function renderList() {
+        const list = document.getElementById('aircraft-list');
+        list.innerHTML = '';
+        db.aircrafts.forEach(ac => {
+            const div = document.createElement('div');
+            div.className = 'ac-item';
+            div.draggable = true;
+            div.innerText = ac.Model;
+            div.ondragstart = (e) => e.dataTransfer.setData("text", ac.Model);
+            list.appendChild(div);
+        });
     }
 
     function draw() {
@@ -85,13 +99,14 @@
         let xPosMap = {};
         let currentX = 100;
 
-        // 1. วาด Stands และ T-Marks
+        // 1. วาดหลุมจอด
         db.stands.forEach(st => {
             const standW = st.Width * SCALE;
             const standL = st.Length * SCALE;
             
             let centerX;
             if (st.ParentID) {
+                // หลุมย่อย (Child) คำนวณจากกึ่งกลาง Parent + Offset (20.5m)
                 centerX = xPosMap[st.ParentID] + (st.OffsetX * SCALE);
             } else {
                 centerX = currentX + (standW / 2);
@@ -99,116 +114,103 @@
             }
             xPosMap[st.StandID] = centerX;
 
-            // พื้นที่หลุม
-            layer.innerHTML += `<rect x="${centerX - standW/2}" y="${HEADER_Y}" width="${standW}" height="${standL}" class="stand-box" ondragover="event.preventDefault()" />`;
+            // วาดกรอบหลุมจอด
+            layer.innerHTML += `<rect x="${centerX - standW/2}" y="${HEADER_Y}" width="${standW}" height="${standL}" class="stand-box ${st.ParentID ? '' : 'stand-parent'}" ondragover="event.preventDefault()" />`;
             layer.innerHTML += `<line x1="${centerX - standW/2}" y1="${HEADER_Y}" x2="${centerX + standW/2}" y2="${HEADER_Y}" class="headerline" />`;
             
-            // T-Marks
+            // วาด T-Marks (T1 @ 12.5m, T2 @ 30m)
             const t1Y = HEADER_Y + (12.5 * SCALE);
             const t2Y = HEADER_Y + (30.0 * SCALE);
             drawTMark(layer, centerX, t1Y, "T1", st.StandID);
             drawTMark(layer, centerX, t2Y, "T2", st.StandID);
             
-            layer.innerHTML += `<text x="${centerX}" y="${HEADER_Y + standL + 20}" fill="#888" text-anchor="middle">${st.StandID}</text>`;
-            if (!st.ParentID) currentX += standW + (2 * SCALE);
+            layer.innerHTML += `<text x="${centerX}" y="${HEADER_Y + standL + 25}" fill="#888" text-anchor="middle" font-size="12">${st.StandID}</text>`;
+            if (!st.ParentID) currentX += standW + (5 * SCALE);
         });
 
         // 2. วาดเครื่องบิน
         allocations.forEach((alloc, idx) => {
             const ac = db.aircrafts.find(a => a.Model === alloc.model);
-            const stand = db.stands.find(s => s.StandID === alloc.standId);
             const centerX = xPosMap[alloc.standId];
             const noseY = HEADER_Y + (alloc.tMark === 'T1' ? 12.5 : 30) * SCALE;
-            const pivotY = noseY + (ac.NoseToPivot * SCALE);
-            
-            // Check Conflict
-            const isLConflict = checkConflict(alloc, 'Left', xPosMap);
-            const isRConflict = checkConflict(alloc, 'Right', xPosMap);
+            const pivotY = noseY + (ac.NoseToPivot * SCALE); // จุดหมุน (ล้อหลัง)
 
-            // Draw Swing Arcs
-            if (alloc.showLeft) drawSwingArc(layer, centerX, pivotY, ac, true, isLConflict);
-            if (alloc.showRight) drawSwingArc(layer, centerX, pivotY, ac, false, isRConflict);
+            // ตรวจสอบความปลอดภัย (Conflict)
+            const conflictL = checkSafety(alloc, 'Left', xPosMap);
+            const conflictR = checkSafety(alloc, 'Right', xPosMap);
 
-            // Draw Aircraft
-            const acGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
-            acGroup.setAttribute("class", "ac-group");
-            acGroup.setAttribute("transform", `translate(${centerX}, ${noseY})`);
-            acGroup.onclick = () => { toggleSwing(idx); draw(); };
-            acGroup.ondblclick = () => { allocations.splice(idx, 1); draw(); };
+            // วาด Arc เลี้ยว (กวาดไปด้านหน้า)
+            if (alloc.mode === 0 || alloc.mode === 1) drawSwing(layer, centerX, pivotY, ac, true, conflictL);
+            if (alloc.mode === 0 || alloc.mode === 2) drawSwing(layer, centerX, pivotY, ac, false, conflictR);
 
-            acGroup.innerHTML = `
-                <path d="M 0,${ac.NoseToPivot * SCALE} L ${-ac.Span*SCALE/2},${(ac.NoseToPivot+2)*SCALE} L ${ac.Span*SCALE/2},${(ac.NoseToPivot+2)*SCALE} Z" class="ac-wing" />
-                <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" class="ac-body" />
-                <circle cx="0" cy="0" r="3" fill="red" /> <!-- Nose Gear Pos -->
-                <text y="-5" fill="yellow" text-anchor="middle" font-size="10">${ac.Model}</text>
+            // วาด Model เครื่องบิน
+            const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            group.setAttribute("transform", `translate(${centerX}, ${noseY})`);
+            group.onclick = () => { allocations[idx].mode = (alloc.mode + 1) % 3; draw(); };
+            group.ondblclick = () => { allocations.splice(idx, 1); draw(); };
+
+            group.innerHTML = `
+                <path d="M 0,${ac.NoseToPivot*SCALE} L ${-ac.Span*SCALE/2},${(ac.NoseToPivot+3)*SCALE} L ${ac.Span*SCALE/2},${(ac.NoseToPivot+3)*SCALE} Z" class="ac-wing" />
+                <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" fill="white" stroke="#333" />
+                <circle cx="0" cy="0" r="4" fill="red" /> <!-- Nose Gear -->
+                <text y="-10" fill="yellow" text-anchor="middle" font-size="12" font-weight="bold">${ac.Model}</text>
             `;
-            layer.appendChild(acGroup);
+            layer.appendChild(group);
         });
     }
 
     function drawTMark(layer, x, y, label, standId) {
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        circle.setAttribute("cx", x); circle.setAttribute("cy", y);
-        circle.setAttribute("class", "t-mark");
-        circle.ondrop = (e) => dropAC(e, standId, label);
-        layer.appendChild(circle);
-        layer.innerHTML += `<text x="${x+10}" y="${y+4}" class="t-text">${label}</text>`;
+        const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 7); c.setAttribute("class", "t-mark");
+        c.ondrop = (e) => {
+            e.preventDefault();
+            const model = e.dataTransfer.getData("text");
+            // ล็อกหลุม MARS
+            const st = db.stands.find(s => s.StandID === standId);
+            allocations = allocations.filter(a => a.standId !== standId);
+            if (st.ParentID) allocations = allocations.filter(a => a.standId !== st.ParentID);
+            else allocations = allocations.filter(a => db.stands.find(s => s.StandID === a.standId).ParentID !== standId);
+
+            allocations.push({ standId, model, tMark: label, mode: 0 });
+            draw();
+        };
+        layer.appendChild(c);
+        layer.innerHTML += `<text x="${x+15}" y="${y+5}" class="t-text">${label}</text>`;
     }
 
-    function drawSwingArc(layer, cx, py, ac, isLeft, isConflict) {
+    function drawSwing(layer, cx, py, ac, isLeft, isDanger) {
         const r = ac.SweepRadius * SCALE;
-        const pOffset = ac.PivotOffset * SCALE;
-        const pivotX = isLeft ? cx + pOffset : cx - pOffset;
-        const colorClass = isConflict ? 'unsafe' : 'safe';
-        const marker = isConflict ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
-
-        // วาดจากแนวปีก (ด้านล่าง) โค้งไปด้านหน้า (ด้านบน)
-        // A rx ry x-axis-rotation large-arc-flag sweep-flag x y
+        const pivotX = isLeft ? cx + (ac.PivotOffset * SCALE) : cx - (ac.PivotOffset * SCALE);
+        const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
+        
+        // วาดจากแนวปีก (ล่าง) ขึ้นไปด้านหน้า (บน)
         const startX = pivotX + (isLeft ? -r : r);
         const endX = pivotX;
         const endY = py - r;
 
-        const pathData = `M ${startX} ${py} A ${r} ${r} 0 0 ${isLeft ? 1 : 0} ${endX} ${endY}`;
-        
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("d", pathData);
-        path.setAttribute("class", `swing-path ${colorClass}`);
-        path.setAttribute("style", `marker-end: ${marker}`);
-        layer.appendChild(path);
+        const d = `M ${startX} ${py} A ${r} ${r} 0 0 ${isLeft ? 1 : 0} ${endX} ${endY}`;
+        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        p.setAttribute("d", d);
+        p.setAttribute("class", `swing-path ${isDanger ? 'unsafe' : 'safe'}`);
+        p.setAttribute("style", `marker-end: ${marker}`);
+        layer.appendChild(p);
     }
 
-    function checkConflict(alloc, side, xPosMap) {
+    function checkSafety(alloc, side, xPosMap) {
         const ac = db.aircrafts.find(a => a.Model === alloc.model);
         const myX = xPosMap[alloc.standId];
         const reach = ac.PivotOffset + ac.SweepRadius;
 
         return allocations.some(other => {
             if (other === alloc) return false;
-            const otherAc = db.aircrafts.find(a => a.Model === other.model);
-            const otherX = xPosMap[other.standId];
-            const dist = Math.abs(myX - otherX) / SCALE;
+            const oAc = db.aircrafts.find(a => a.Model === other.model);
+            const oX = xPosMap[other.standId];
+            const dist = Math.abs(myX - oX) / SCALE;
             
-            // ถ้าเลี้ยวไปทางนั้น แล้วระยะเหวี่ยง + ครึ่งปีกเครื่องข้างๆ > ระยะห่าง Centerline = ชน
-            const isToward = (side === 'Left' && otherX < myX) || (side === 'Right' && otherX > myX);
-            if (isToward && (reach + (otherAc.Span / 2) > dist)) return true;
+            const isCorrectSide = (side === 'Left' && oX < myX) || (side === 'Right' && oX > myX);
+            if (isCorrectSide && (reach + (oAc.Span / 2) > dist)) return true;
             return false;
         });
-    }
-
-    function dropAC(e, standId, tMark) {
-        e.preventDefault();
-        const model = e.dataTransfer.getData("text");
-        // ลบของเก่าในหลุมเดียวกันออกก่อน (ถ้ามี)
-        allocations = allocations.filter(a => a.standId !== standId);
-        allocations.push({ standId, model, tMark, showLeft: true, showRight: true });
-        draw();
-    }
-
-    function toggleSwing(idx) {
-        const a = allocations[idx];
-        if (a.showLeft && a.showRight) a.showRight = false;
-        else if (a.showLeft && !a.showRight) { a.showLeft = false; a.showRight = true; }
-        else if (!a.showLeft && a.showRight) { a.showLeft = true; a.showRight = true; }
     }
 
     init();
