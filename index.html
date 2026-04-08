@@ -2,269 +2,154 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ICAO Stand Allocation & Swing-out Planner</title>
+    <title>Multi-Aircraft Stand Allocation & Swing-out Planner</title>
     <style>
-        :root {
-            --bg-dark: #121212;
-            --panel-bg: #1e1e1e;
-            --accent: #f39c12;
-            --danger: #e74c3c;
-            --success: #2ecc71;
-            --text: #ffffff;
-        }
-
-        body {
-            margin: 0;
-            display: flex;
-            height: 100vh;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--bg-dark);
-            color: var(--text);
-            overflow: hidden;
-        }
-
-        /* Sidebar */
-        #sidebar {
-            width: 380px;
-            background: var(--panel-bg);
-            padding: 20px;
-            border-right: 1px solid #333;
-            box-shadow: 2px 0 10px rgba(0,0,0,0.5);
-            overflow-y: auto;
-            z-index: 10;
-        }
-
-        /* Main Viewport */
-        #viewport {
-            flex-grow: 1;
-            position: relative;
-            background: #111;
-            display: flex;
-            flex-direction: column;
-        }
-
-        svg {
-            width: 100%;
-            height: 100%;
-            background: #222;
-        }
-
-        /* UI Elements */
-        .card {
-            background: #2d2d2d;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            border-left: 4px solid var(--accent);
-        }
-
-        select {
-            width: 100%;
-            padding: 12px;
-            margin: 10px 0;
-            background: #3d3d3d;
-            color: white;
-            border: 1px solid #555;
-            border-radius: 5px;
-        }
-
-        .audit-step {
-            font-size: 0.9em;
-            margin-bottom: 10px;
-            padding: 8px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 5px;
-        }
-
-        .formula {
-            font-family: monospace;
-            color: var(--accent);
-            display: block;
-            margin-top: 5px;
-        }
-
-        /* SVG Styles */
-        .stand-box { fill: #333; stroke: #555; stroke-width: 1; }
-        .stand-label { fill: #888; font-size: 14px; font-weight: bold; }
-        .aircraft-body { fill: #f0f0f0; stroke: #333; }
-        .aircraft-wing { fill: #bdc3c7; stroke: #333; }
-        .swing-radius { fill: rgba(243, 156, 18, 0.1); stroke: var(--accent); stroke-dasharray: 4; }
-        .swing-conflict { fill: rgba(231, 76, 60, 0.2); stroke: var(--danger); }
-        .safe-text { color: var(--success); font-weight: bold; }
-        .unsafe-text { color: var(--danger); font-weight: bold; }
+        :root { --accent: #ff4757; --bg: #1e272e; --panel: #2f3542; }
+        body { margin: 0; display: flex; height: 100vh; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; }
+        
+        #sidebar { width: 380px; background: var(--panel); padding: 20px; border-right: 2px solid #000; overflow-y: auto; }
+        #viewport { flex-grow: 1; overflow: auto; background: #000; position: relative; }
+        
+        svg { background: #222; min-width: 2500px; height: 100%; }
+        
+        .stand-ctrl { background: #3e4451; padding: 12px; margin-bottom: 10px; border-radius: 8px; border-left: 5px solid #747d8c; }
+        .stand-ctrl.active { border-left-color: #2ed573; }
+        
+        select { width: 100%; padding: 10px; margin-top: 8px; border-radius: 4px; border: none; background: #57606f; color: white; }
+        
+        .stand-box { fill: #2c3e50; stroke: #555; stroke-width: 1; }
+        .ac-fuselage { fill: #f1f2f6; stroke: #2f3542; }
+        .ac-wing { fill: #ced6e0; stroke: #2f3542; }
+        .swing-path { fill: rgba(255, 71, 87, 0.1); stroke: var(--accent); stroke-width: 2; stroke-dasharray: 8; }
+        .collision { fill: rgba(255, 71, 87, 0.4) !important; stroke: #ff0000 !important; stroke-width: 4 !important; }
+        
+        .audit-card { background: white; color: #2f3542; padding: 15px; border-radius: 8px; margin-top: 20px; font-size: 0.9em; }
+        .formula { font-family: monospace; color: #ff4757; display: block; margin: 5px 0; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <h2 style="color: var(--accent)">Stand Allocation</h2>
-    <p id="conn-status">📡 กำลังเชื่อมต่อฐานข้อมูล...</p>
-
-    <div class="card">
-        <label>1. เลือกเครื่องบิน:</label>
-        <select id="ac-select" onchange="processAllocation()"></select>
-        
-        <label>2. เลือกหลุมจอด:</label>
-        <select id="stand-select" onchange="processAllocation()"></select>
-    </div>
-
-    <div id="audit-log">
-        <!-- การคำนวณจะแสดงตรงนี้ -->
-    </div>
+    <h2>Apron Manager</h2>
+    <p id="status">Connecting...</p>
+    <div id="controls"></div>
+    <div id="audit"></div>
 </div>
 
 <div id="viewport">
-    <svg id="apron-svg" viewBox="0 0 1200 600">
-        <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#2c2c2c" stroke-width="1"/>
-            </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#grid)" />
-        <g id="apron-layer"></g>
+    <svg id="apron-svg">
+        <g id="grid-layer"></g>
+        <g id="draw-layer"></g>
     </svg>
 </div>
 
 <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbx5apqROG0s7dmeu5vhyyvPSvmPrg9GWaBtQ4paa4nYwGbshW4TRmnCFDmryLJEBpDL/exec";
     let db = { aircrafts: [], stands: [] };
-    const SCALE = 3; // 1 เมตร = 3 พิกเซล
+    let allocations = {}; // { StandID: ModelName }
+    const SCALE = 4; // 1m = 4px
 
-    async function fetchData() {
+    async function init() {
         try {
-            const response = await fetch(API_URL);
-            db = await response.json();
+            const res = await fetch(API_URL);
+            db = await res.json();
+            document.getElementById('status').innerHTML = "🟢 Connected to Google Sheets";
             
-            // Populate Dropdowns
-            const acSelect = document.getElementById('ac-select');
-            const stSelect = document.getElementById('stand-select');
-            
-            db.aircrafts.forEach(ac => acSelect.innerHTML += `<option value="${ac.Model}">${ac.Model} (Span: ${ac.Span}m)</option>`);
-            db.stands.forEach(st => stSelect.innerHTML += `<option value="${st.StandID}">${st.StandID}</option>`);
-            
-            document.getElementById('conn-status').innerHTML = "✅ เชื่อมต่อฐานข้อมูล GS แล้ว";
-            document.getElementById('conn-status').style.color = "var(--success)";
-            
-            processAllocation();
-        } catch (e) {
-            document.getElementById('conn-status').innerHTML = "❌ การเชื่อมต่อล้มเหลว";
-            console.error(e);
-        }
+            const ctrl = document.getElementById('controls');
+            db.stands.forEach(st => {
+                allocations[st.StandID] = "None";
+                ctrl.innerHTML += `
+                    <div class="stand-ctrl">
+                        <label>Stand <strong>${st.StandID}</strong> (Width: ${st.Width}m)</label>
+                        <select onchange="updateStand('${st.StandID}', this.value)">
+                            <option value="None">-- Empty --</option>
+                            ${db.aircrafts.map(ac => `<option value="${ac.Model}">${ac.Model}</option>`).join('')}
+                        </select>
+                    </div>
+                `;
+            });
+            draw();
+        } catch (e) { document.getElementById('status').innerHTML = "🔴 Connection Error"; }
     }
 
-    function processAllocation() {
-        const selectedAc = db.aircrafts.find(a => a.Model === document.getElementById('ac-select').value);
-        const selectedStandId = document.getElementById('stand-select').value;
-        
-        renderApron(selectedAc, selectedStandId);
+    function updateStand(id, model) {
+        allocations[id] = model;
+        draw();
     }
 
-    function renderApron(ac, activeStandId) {
-        const layer = document.getElementById('apron-layer');
+    function draw() {
+        const layer = document.getElementById('draw-layer');
         layer.innerHTML = '';
-        
         let currentX = 50;
-        const centerY = 300;
+        const centerY = 450;
+        let auditHTML = "<h3>Audit Check</h3>";
 
-        db.stands.forEach(stand => {
+        db.stands.forEach((stand, idx) => {
+            const acModel = allocations[stand.StandID];
+            const ac = db.aircrafts.find(a => a.Model === acModel);
             const standW = stand.Width * SCALE;
             const standL = stand.Length * SCALE;
             const centerX = currentX + (standW / 2);
-            const isActive = stand.StandID === activeStandId;
 
-            // 1. วาดกรอบหลุมจอด
+            // วาดหลุมจอด
             layer.innerHTML += `
-                <rect x="${currentX}" y="${centerY - standL/2}" width="${standW}" height="${standL}" class="stand-box" />
-                <text x="${centerX}" y="${centerY + standL/2 + 25}" class="stand-label" text-anchor="middle">
-                    ${stand.StandID} (${stand.Width}x${stand.Length}m)
-                </text>
+                <rect x="${currentX}" y="${centerY - standL}" width="${standW}" height="${standL}" class="stand-box" />
+                <text x="${centerX}" y="${centerY + 30}" fill="#aaa" text-anchor="middle" font-size="14">${stand.StandID}</text>
             `;
 
-            if (isActive) {
-                // 2. คำนวณ ICAO Safety Margin
-                const margin = (ac.Code === 'D' || ac.Code === 'E' || ac.Code === 'F') ? 7.5 : 4.5;
-                const swingRadius = (ac.Span / 2) + margin;
+            if (ac) {
+                const pivotOffset = ac.PivotOffset * SCALE;
+                const sweepR = ac.SweepRadius * SCALE;
+                const totalReach = ac.PivotOffset + ac.SweepRadius; // ระยะเหวี่ยงจาก Centerline
                 
-                // ตรวจสอบ Conflict (ถ้าวงรัศมีเกินความกว้างหลุม/2)
-                const isConflict = swingRadius > (stand.Width / 2);
-
-                // 3. วาด Swing Zone
+                // ตรวจสอบการชนกับลำข้างๆ (Stand ชิดกันไม่มี Gap)
+                let collision = false;
+                
+                // เช็คเพื่อนบ้านขวา
+                if (idx < db.stands.length - 1) {
+                    const nextSt = db.stands[idx+1];
+                    const nextAc = db.aircrafts.find(a => a.Model === allocations[nextSt.StandID]);
+                    if (nextAc) {
+                        const requiredDist = totalReach + (nextAc.Span / 2);
+                        if (requiredDist > stand.Width) collision = true;
+                    }
+                }
+                
+                // วาด Swing Arc (หมุนจากล้อหลัง)
+                const pivotX = centerX - pivotOffset;
                 layer.innerHTML += `
-                    <circle cx="${centerX}" cy="${centerY}" r="${swingRadius * SCALE}" 
-                            class="swing-radius ${isConflict ? 'swing-conflict' : ''}" />
+                    <path d="M ${pivotX + sweepR} ${centerY - 10} A ${sweepR} ${sweepR} 0 0 0 ${pivotX - sweepR} ${centerY - 10}" 
+                          class="swing-path ${collision ? 'collision' : ''}" fill="none" />
                 `;
 
-                // 4. วาดโมเดลเครื่องบิน Top-view
-                drawAircraft(layer, centerX, centerY, ac);
-                
-                // 5. อัปเดต Audit Log
-                updateAuditLog(ac, stand, margin, swingRadius, isConflict);
+                // วาดโมเดลเครื่องบิน Top-view
+                drawACModel(layer, centerX, centerY, ac);
+
+                if (collision) {
+                    auditHTML += `<div style="color:red">⚠️ <strong>${stand.StandID}</strong>: Swing-out will hit aircraft in next stand!</div>`;
+                }
             }
-
-            currentX += standW + 20; // เว้นระยะห่างระหว่างหลุม 20px
+            currentX += standW;
         });
+        document.getElementById('audit').innerHTML = auditHTML;
     }
 
-    function drawAircraft(layer, cx, cy, ac) {
+    function drawACModel(layer, cx, cy, ac) {
         const s = SCALE;
-        const w = ac.Span * s;
-        const l = ac.Length * s;
-
-        const html = `
-            <g transform="translate(${cx}, ${cy})">
-                <!-- Wings -->
-                <path d="M 0,${-l/5} L ${-w/2},${l/8} L ${w/2},${l/8} Z" class="aircraft-wing" />
-                <!-- Fuselage -->
-                <rect x="${-w/16}" y="${-l/2}" width="${w/8}" height="${l}" rx="${w/16}" class="aircraft-body" />
-                <!-- Tail -->
-                <path d="M ${-w/6},${l/2.2} L ${w/6},${l/2.2} L 0,${l/3} Z" class="aircraft-wing" />
-                <!-- Nose Direction -->
-                <circle cx="0" cy="${-l/2}" r="3" fill="red" />
-            </g>
+        const span = ac.Span * s;
+        const len = ac.Length * s;
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("transform", `translate(${cx}, ${cy - len/2})`);
+        
+        g.innerHTML = `
+            <path d="M 0,${-len/4} L ${-span/2},${len/8} L ${span/2},${len/8} Z" class="ac-wing" />
+            <rect x="${-span/16}" y="${-len/2}" width="${span/8}" height="${len}" rx="10" class="ac-fuselage" />
+            <text y="${-len/2 - 10}" fill="yellow" text-anchor="middle" font-size="12">${ac.Model}</text>
         `;
-        layer.innerHTML += html;
+        layer.appendChild(g);
     }
 
-    function updateAuditLog(ac, stand, margin, swingRadius, isConflict) {
-        const log = document.getElementById('audit-log');
-        const codeMatch = ac.Code <= stand.MaxCode;
-
-        log.innerHTML = `
-            <h3>Verification Details</h3>
-            
-            <div class="audit-step">
-                <strong>1. มาตรฐานความปลอดภัย (ICAO):</strong><br>
-                เครื่องบิน Code ${ac.Code} ต้องมีระยะห่างขั้นต่ำ
-                <span class="formula">Safety Margin = ${margin} m</span>
-            </div>
-
-            <div class="audit-step">
-                <strong>2. พื้นที่ Swing-out ที่ต้องการ:</strong><br>
-                สูตร: (Wingspan / 2) + Margin
-                <span class="formula">(${ac.Span} / 2) + ${margin} = ${swingRadius.toFixed(2)} m</span>
-            </div>
-
-            <div class="audit-step">
-                <strong>3. ตรวจสอบพื้นที่ข้างเคียง:</strong><br>
-                ความกว้างหลุม ${stand.StandID} คือ ${stand.Width}m (ระยะจากกึ่งกลาง = ${stand.Width/2}m)<br>
-                ผลลัพธ์: ${isConflict ? 
-                    '<span class="unsafe-text">❌ ไม่ปลอดภัย (ล้ำหลุมข้างเคียง)</span>' : 
-                    '<span class="safe-text">✅ ปลอดภัย (อยู่ในเขตหลุม)</span>'}
-            </div>
-
-            <div class="audit-step">
-                <strong>4. ความสามารถในการรับเครื่องบิน:</strong><br>
-                หลุมจอดรับได้สูงสุด Code ${stand.MaxCode}<br>
-                สถานะ: ${codeMatch ? 
-                    '<span class="safe-text">✅ ตรงตามมาตรฐาน</span>' : 
-                    '<span class="unsafe-text">❌ ขนาดเครื่องบินเกินขีดจำกัด</span>'}
-            </div>
-        `;
-    }
-
-    fetchData();
+    init();
 </script>
-
 </body>
 </html>
