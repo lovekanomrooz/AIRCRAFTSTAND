@@ -2,53 +2,50 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>Advanced Aircraft Stand Planner - Parallel & Rotation v8</title>
+    <title>Aircraft Stand Planner Pro v9 - Smart Geometry</title>
     <style>
-        :root { --safe: #2ecc71; --danger: #e74c3c; --accent: #f1c40f; --bg: #0d0d0d; --panel: #1a1a1a; }
+        :root { --safe: #2ecc71; --danger: #e74c3c; --accent: #f1c40f; --bg: #111; --panel: #222; }
         body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Sarabun', sans-serif; background: var(--bg); color: white; overflow: hidden; }
         
         /* Top Navigation */
-        #top-bar { height: 140px; background: var(--panel); border-bottom: 2px solid #333; padding: 10px 20px; display: flex; gap: 15px; align-items: center; z-index: 1000; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
-        .ac-list-container { display: flex; gap: 10px; overflow-x: auto; flex-grow: 1; padding: 5px; }
-        .ac-item { min-width: 130px; background: #2c3e50; padding: 10px; border-radius: 6px; cursor: pointer; text-align: center; font-weight: bold; border: 2px solid transparent; }
-        .ac-item.selected { background: var(--accent); color: #000; border-color: #fff; }
+        #top-bar { height: 110px; background: var(--panel); border-bottom: 2px solid #333; padding: 10px 20px; display: flex; gap: 15px; align-items: center; z-index: 1000; }
+        .ac-list-container { display: flex; gap: 8px; overflow-x: auto; flex-grow: 1; }
+        .ac-item { min-width: 130px; background: #34495e; padding: 12px; border-radius: 6px; cursor: pointer; text-align: center; font-weight: bold; border: 2px solid transparent; font-size: 0.9rem; }
+        .ac-item.selected { background: var(--accent); color: #000; }
         
-        .tool-box { min-width: 320px; background: #252525; padding: 12px; border-radius: 8px; border: 1px solid #444; font-size: 0.9rem; }
-        input[type=range] { width: 100%; margin: 5px 0; cursor: pointer; }
+        .tool-box { background: #2c3e50; padding: 10px; border-radius: 8px; font-size: 0.85rem; min-width: 250px; }
 
-        /* Content Area */
-        #main-container { display: flex; flex-grow: 1; overflow: hidden; }
+        /* Viewport */
         #viewport { flex-grow: 1; overflow: auto; background: #000; position: relative; }
-        #audit-panel { width: 550px; min-width: 550px; background: var(--panel); padding: 25px; overflow-y: auto; border-left: 2px solid #333; }
-
         svg { background: #111; min-width: 5000px; height: 100%; }
 
         /* SVG Layers */
-        #bg-layer { pointer-events: none; }
-        #swing-layer { pointer-events: none; }
-        #ac-layer { pointer-events: all; }
+        .stand-box { fill: rgba(255,255,255,0.01); stroke: #444; stroke-width: 1; }
+        .no-go-line { stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 5; fill: none; }
+        .t-mark { fill: var(--accent); opacity: 0.6; cursor: pointer; }
+        .t-mark:hover { r: 10; opacity: 1; }
 
-        .stand-box { fill: rgba(255,255,255,0.01); stroke: #333; }
-        .no-go-zone { fill: rgba(231, 76, 60, 0.05); stroke: var(--danger); stroke-dasharray: 5; opacity: 0.5; }
-        .t-mark { fill: var(--accent); opacity: 0.4; cursor: pointer; }
-
-        .swing-path { fill: rgba(255, 255, 255, 0.02); stroke-width: 4; pointer-events: none; }
+        .swing-path { fill: rgba(255, 255, 255, 0.02); stroke-width: 3; pointer-events: none; }
         .safe { stroke: var(--safe); }
         .unsafe { stroke: var(--danger); }
         
-        .wing-gap-line { stroke: #3498db; stroke-width: 2; stroke-dasharray: 6; }
-        .wing-gap-text { fill: #3498db; font-size: 14px; font-weight: bold; paint-order: stroke; stroke: #000; stroke-width: 3px; }
+        .gap-line { stroke: #3498db; stroke-width: 2; stroke-dasharray: 5; pointer-events: none; }
+        .gap-text { fill: #3498db; font-size: 14px; font-weight: bold; paint-order: stroke; stroke: #000; stroke-width: 3px; }
 
-        .ac-group { cursor: pointer; }
-        .ac-body { fill: #fff; stroke: #333; transition: 0.2s; }
-        .active-ac .ac-body { stroke: var(--accent); stroke-width: 4; filter: drop-shadow(0 0 8px var(--accent)); }
-        .pivot-dot { fill: #ff4757; r: 5; }
+        .ac-group { cursor: pointer; pointer-events: all; }
+        .ac-body { fill: #fff; stroke: #333; }
+        .active-ac .ac-body { stroke: var(--accent); stroke-width: 3; filter: drop-shadow(0 0 5px var(--accent)); }
+        .pivot-dot { fill: #ff4757; r: 5; pointer-events: none; }
 
-        /* Audit Panel UI */
-        .audit-card { background: #252a33; padding: 20px; border-radius: 12px; border-top: 8px solid var(--accent); line-height: 1.6; margin-bottom: 20px; }
-        .formula { font-family: monospace; color: var(--accent); display: block; background: rgba(0,0,0,0.4); padding: 10px; border-radius: 6px; margin: 8px 0; }
-        .res-box { font-size: 1.4rem; font-weight: bold; text-align: center; padding: 15px; border-radius: 8px; margin-top: 15px; border: 2px dashed; }
-        
+        /* Floating Audit Panel */
+        #audit-float { 
+            position: absolute; top: 130px; right: 20px; width: 400px; 
+            background: rgba(30, 30, 30, 0.95); padding: 20px; border-radius: 12px; 
+            border: 1px solid #444; box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
+            display: none; z-index: 500;
+        }
+        .audit-card { line-height: 1.6; font-size: 0.95rem; }
+        .formula { color: var(--accent); font-family: monospace; display: block; margin: 5px 0; }
         #ghost-group { pointer-events: none; display: none; opacity: 0.3; }
     </style>
 </head>
@@ -56,54 +53,43 @@
 
 <header id="top-bar">
     <div class="tool-box">
-        <label>🎯 การวาง: </label>
-        <select id="place-mode" style="background:#444; color:white; border:none; padding:3px; border-radius:4px;">
+        🎯 <b>Mode:</b> 
+        <select id="place-mode" style="background:#444; color:white; border:none; padding:2px;">
             <option value="snap">Snap T-Mark</option>
-            <option value="free">อิสระ (Free Mode)</option>
+            <option value="free">อิสระ (Parallel)</option>
         </select>
         <br>
-        <label>🔄 หมุนหัวเครื่อง: <span id="deg-val">0</span>°</label>
-        <input type="range" id="ac-rotation" min="0" max="360" value="0" oninput="updateRotation(this.value)">
+        🔄 <b>Rotation:</b> <input type="range" id="ac-rot" min="0" max="360" value="0" style="width:100px" oninput="updateRotPreview(this.value)"> <span id="deg-val">0</span>°
     </div>
-    <div class="config-box" style="min-width:180px; background:#252525; padding:12px; border-radius:8px; border:1px solid #444;">
-        <label>📏 Safety Margin:</label><br>
-        <input type="number" id="extra-margin" style="width:60px; padding:5px; margin-top:5px;" value="0" oninput="draw()"> <b>ม.</b>
-    </div>
-    <div class="ac-list-container" id="aircraft-list">ดึงข้อมูลเครื่องบิน...</div>
-    <button id="cancel-btn" onclick="cancelSelection()" style="display:none; padding:15px; background:var(--danger); border:none; color:white; border-radius:8px; cursor:pointer; font-weight:bold;">ยกเลิก</button>
+    <div class="ac-list-container" id="aircraft-list"></div>
+    <button id="cancel-btn" onclick="cancelSelection()" style="display:none; padding:10px; background:var(--danger); color:white; border:none; border-radius:6px; cursor:pointer;">ยกเลิก</button>
 </header>
 
-<div id="main-container">
-    <div id="viewport">
-        <svg id="apron-svg" onmousemove="moveGhost(event)" onclick="handleSvgClick(event)">
-            <defs>
-                <marker id="arrow-safe" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2ecc71"/></marker>
-                <marker id="arrow-danger" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#e74c3c"/></marker>
-            </defs>
-            <g id="bg-layer"></g>
-            <g id="swing-layer"></g>
-            <g id="ac-layer"></g>
-            <g id="ghost-group">
-                <path id="ghost-wing" d="" fill="#ced6e0" />
-                <rect id="ghost-body" rx="8" fill="#fff" />
-            </g>
-        </svg>
-    </div>
+<div id="viewport">
+    <svg id="apron-svg" onmousemove="moveGhost(event)" onclick="handleSvgClick(event)">
+        <defs>
+            <marker id="arrow-safe" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2ecc71"/></marker>
+            <marker id="arrow-danger" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#e74c3c"/></marker>
+        </defs>
+        <g id="bg-layer"></g>
+        <g id="swing-layer"></g>
+        <g id="ac-layer"></g>
+        <g id="ghost-group"><path id="ghost-wing" fill="#ced6e0"/><rect id="ghost-body" fill="#fff" rx="8"/></g>
+    </svg>
 
-    <div id="audit-panel">
-        <h2 style="color: var(--accent); margin-top: 0;">📊 ผลการตรวจสอบทางเทคนิค</h2>
-        <div id="audit-content">กรุณาเลือกอากาศยานบนลานจอด...</div>
+    <!-- Floating Audit Panel -->
+    <div id="audit-float">
+        <div id="audit-content" class="audit-card"></div>
+        <button onclick="document.getElementById('audit-float').style.display='none'" style="width:100%; margin-top:10px; background:#444; color:white; border:none; padding:5px; cursor:pointer;">ปิด</button>
     </div>
 </div>
 
 <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbx5apqROG0s7dmeu5vhyyvPSvmPrg9GWaBtQ4paa4nYwGbshW4TRmnCFDmryLJEBpDL/exec";
-
     let db = { aircrafts: [], stands: [], clearanceRules: [] };
     let allocations = []; 
-    let selectedAC = null, activeIdx = null, currentRotation = 0, xMap = {}; 
-    const SCALE = 4; // 1m = 4px
-    const HEADER_Y = 100;
+    let selectedAC = null, activeIdx = null, currentRotation = 0, xMap = {};
+    const SCALE = 4, HEADER_Y = 100;
 
     async function init() {
         try {
@@ -111,7 +97,7 @@
             db = await res.json();
             renderList();
             draw();
-        } catch (e) { console.error("API Error", e); }
+        } catch (e) { alert("GS Connection Failed"); }
     }
 
     function renderList() {
@@ -127,13 +113,13 @@
                 selectedAC = ac;
                 document.getElementById('ghost-group').style.display = 'block';
                 document.getElementById('cancel-btn').style.display = 'block';
-                updateRotation(currentRotation);
+                updateRotPreview(currentRotation);
             };
             list.appendChild(div);
         });
     }
 
-    function updateRotation(val) {
+    function updateRotPreview(val) {
         currentRotation = parseInt(val);
         document.getElementById('deg-val').innerText = val;
         if (!selectedAC) return;
@@ -161,14 +147,13 @@
         if (!selectedAC) return;
         const pt = getSvgPt(e);
         const mode = document.getElementById('place-mode').value;
-        let targetStandId = null, snapX = pt.x, snapY = pt.y;
+        let bestSt = null, snapX = pt.x, snapY = pt.y;
 
-        // ค้นหาหลุมจอด
         const sorted = [...db.stands].sort((a,b) => (b.ParentID?1:0) - (a.ParentID?1:0));
         for (let st of sorted) {
             const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
             if (pt.x >= cx - hw && pt.x <= cx + hw) {
-                targetStandId = st.StandID;
+                bestSt = st.StandID;
                 if (mode === 'snap') {
                     const t1 = HEADER_Y + (12.5*SCALE), t2 = HEADER_Y + (30*SCALE);
                     snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
@@ -178,24 +163,12 @@
             }
         }
 
-        if (targetStandId) {
-            // เช็คเขต No-Go 12.5ม.
-            const stand = db.stands.find(s => s.StandID === targetStandId);
-            const minY = HEADER_Y + (12.5 * SCALE);
-            const maxY = HEADER_Y + (stand.Length * SCALE) - (12.5 * SCALE);
-            if (snapY < minY || snapY > maxY) {
-                alert("⚠️ ตำแหน่ง Nose Gear อยู่นอกเขตปลอดภัย (ห้ามจอดใกล้ Header/Tail 12.5ม.)");
-                return;
-            }
+        if (bestSt) {
+            const st = db.stands.find(s => s.StandID === bestSt);
+            const minY = HEADER_Y + (12.5*SCALE), maxY = HEADER_Y + (st.Length-12.5)*SCALE;
+            if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
 
-            allocations.push({ 
-                id: Date.now(), 
-                standId: targetStandId, 
-                model: selectedAC.Model, 
-                x: snapX, y: snapY, 
-                rotation: currentRotation, 
-                turnMode: 0 
-            });
+            allocations.push({ id: Date.now(), standId: bestSt, model: selectedAC.Model, x: snapX, y: snapY, rotation: currentRotation, turnMode: 0 });
             activeIdx = allocations.length - 1;
             cancelSelection();
             draw();
@@ -208,10 +181,9 @@
         const acL = document.getElementById('ac-layer');
         bg.innerHTML = ''; sw.innerHTML = ''; acL.innerHTML = '';
 
-        const margin = parseFloat(document.getElementById('extra-margin').value) || 0;
         let curX = 50; xMap = {};
 
-        // 1. วาดหลุมจอดและ No-Go Zone
+        // 1. วาดหลุมจอด
         db.stands.forEach(st => {
             const w = st.Width * SCALE, l = st.Length * SCALE;
             let cx = (st.ParentID && xMap[st.ParentID]) ? xMap[st.ParentID] + (st.OffsetX * SCALE) : (curX + w/2);
@@ -219,28 +191,29 @@
             if (!st.ParentID) curX += w;
 
             bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y}" width="${w}" height="${l}" class="stand-box" />`;
-            // วาด No-Go Zone (12.5ม.)
-            bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y + (12.5*SCALE)}" width="${w}" height="${l - (25*SCALE)}" class="no-go-zone" />`;
+            bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y + (12.5*SCALE)}" width="${w}" height="${l - (25*SCALE)}" class="no-go-line" />`;
+            bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 12.5*SCALE}" r="6" class="t-mark" />`;
+            bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 30.0*SCALE}" r="6" class="t-mark" />`;
             bg.innerHTML += `<text x="${cx}" y="${HEADER_Y + l + 20}" fill="#888" text-anchor="middle" font-size="11">${st.StandID}</text>`;
         });
 
-        // 2. วาดเครื่องบินและคำนวณความปลอดภัย
+        // 2. วาดเครื่องบิน
         allocations.forEach((alloc, idx) => {
             const ac = db.aircrafts.find(a => a.Model === alloc.model);
-            const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE, r = (ac.SweepRadius + margin) * SCALE;
+            const rad = (alloc.rotation - 90) * Math.PI / 180;
+            const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE, r = ac.SweepRadius * SCALE;
             
-            // คำนวณพิกัดล้อหลังอิงตามการหมุน
-            const rad = (alloc.rotation - 90) * (Math.PI / 180);
             const mlgCx = alloc.x - Math.cos(rad) * pDist;
             const mlgCy = alloc.y - Math.sin(rad) * pDist;
 
-            const isDanger = checkCollision(alloc, idx, margin);
+            const isDanger = checkCollision(alloc, idx);
 
-            // วาดเส้น Swing Path
-            if (alloc.turnMode === 0) drawArc(sw, mlgCx + Math.cos(rad+Math.PI/2)*pOff, mlgCy + Math.sin(rad+Math.PI/2)*pOff, r, true, isDanger, alloc.rotation);
-            else drawArc(sw, mlgCx - Math.cos(rad+Math.PI/2)*pOff, mlgCy - Math.sin(rad+Math.PI/2)*pOff, r, false, isDanger, alloc.rotation);
+            // Swing Path (180 Arc Top)
+            const pivotX = (alloc.turnMode === 0) ? mlgCx + Math.cos(rad+Math.PI/2)*pOff : mlgCx - Math.cos(rad+Math.PI/2)*pOff;
+            const pivotY = (alloc.turnMode === 0) ? mlgCy + Math.sin(rad+Math.PI/2)*pOff : mlgCy - Math.sin(rad+Math.PI/2)*pOff;
+            drawArc(sw, pivotX, pivotY, r, alloc.turnMode === 0, isDanger, alloc.rotation);
 
-            // วาดเครื่องบิน
+            // Model
             const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
             g.setAttribute("transform", `translate(${alloc.x}, ${alloc.y}) rotate(${alloc.rotation})`);
             g.setAttribute("class", `ac-group ${activeIdx === idx ? 'active-ac' : ''}`);
@@ -253,20 +226,25 @@
             g.ondblclick = (e) => { e.stopPropagation(); allocations.splice(idx, 1); activeIdx = null; draw(); };
             acL.appendChild(g);
 
-            // วาดระยะห่างปลายปีกเฉพาะหลุมติดกัน
-            drawSpecificGap(sw, alloc, idx);
+            // Pivot Dot
+            sw.innerHTML += `<circle cx="${pivotX}" cy="${pivotY}" class="pivot-dot" />`;
+
+            // Draw Dynamic Gap
+            calculateAndDrawGaps(sw, alloc, idx);
         });
 
-        if (activeIdx !== null && allocations[activeIdx]) updateAudit(allocations[activeIdx], activeIdx, margin);
+        if (activeIdx !== null && allocations[activeIdx]) updateAudit(allocations[activeIdx], activeIdx);
     }
 
     function drawArc(layer, px, py, r, isRight, isDanger, rot) {
         const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
         const baseAngle = (rot - 90) * Math.PI / 180;
-        const d = isRight 
-            ? `M ${px + Math.cos(baseAngle + Math.PI/2)*r} ${py + Math.sin(baseAngle + Math.PI/2)*r} A ${r} ${r} 0 0 1 ${px + Math.cos(baseAngle - Math.PI/2)*r} ${py + Math.sin(baseAngle - Math.PI/2)*r}`
-            : `M ${px + Math.cos(baseAngle - Math.PI/2)*r} ${py + Math.sin(baseAngle - Math.PI/2)*r} A ${r} ${r} 0 0 0 ${px + Math.cos(baseAngle + Math.PI/2)*r} ${py + Math.sin(baseAngle + Math.PI/2)*r}`;
-        
+        const startX = px + Math.cos(baseAngle + (isRight ? Math.PI : 0)) * r;
+        const startY = py + Math.sin(baseAngle + (isRight ? Math.PI : 0)) * r;
+        const endX = px + Math.cos(baseAngle + (isRight ? 0 : Math.PI)) * r;
+        const endY = py + Math.sin(baseAngle + (isRight ? 0 : Math.PI)) * r;
+
+        const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${isRight ? 1 : 0} ${endX} ${endY}`;
         const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
         p.setAttribute("d", d);
         p.setAttribute("class", `swing-path ${isDanger?'unsafe':'safe'}`);
@@ -274,32 +252,39 @@
         layer.appendChild(p);
     }
 
-    function drawSpecificGap(layer, alloc, idx) {
+    function calculateAndDrawGaps(layer, alloc, idx) {
         const myAc = db.aircrafts.find(a => a.Model === alloc.model);
         const myStandIdx = db.stands.findIndex(s => s.StandID === alloc.standId);
 
         allocations.forEach((other, otIdx) => {
             if (idx === otIdx) return;
+            const otAc = db.aircrafts.find(a => a.Model === other.model);
             const otStandIdx = db.stands.findIndex(s => s.StandID === other.standId);
-            
-            // วาดเฉพาะถ้าจอดในหลุมติดกัน (Stand Index ห่างกันไม่เกิน 2 สำหรับหลุมย่อย MARS)
-            if (Math.abs(myStandIdx - otStandIdx) <= 2) {
-                const otAc = db.aircrafts.find(a => a.Model === other.model);
-                const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2));
-                const gap = (dist - (myAc.Span*SCALE/2 + otAc.Span*SCALE/2)) / SCALE;
-                
-                if (alloc.x < other.x) { // วาดเส้นเชื่อม
-                    const x1 = alloc.x + (myAc.Span*SCALE/2), x2 = other.x - (otAc.Span*SCALE/2);
-                    layer.innerHTML += `<line x1="${x1}" y1="${alloc.y+50}" x2="${x2}" y2="${other.y+50}" class="wing-gap-line" />`;
-                    layer.innerHTML += `<text x="${(x1+x2)/2}" y="${alloc.y+45}" class="wing-gap-text" text-anchor="middle">${gap.toFixed(2)}m</text>`;
+
+            // กฎข้อ 3: วัดเฉพาะหลุมติดกัน
+            if (Math.abs(myStandIdx - otStandIdx) <= 2 && alloc.x < other.x) {
+                // กฎข้อ 1 & 2: ตรวจสอบการจอดขนาน
+                const isParallel = Math.abs(alloc.rotation - other.rotation) >= 45;
+                let p1, p2;
+
+                if (!isParallel) { // จอดทิศเดียวกัน: วัดปลายปีก
+                    p1 = { x: alloc.x + (myAc.Span*SCALE/2), y: alloc.y + (myAc.NoseToPivot*SCALE) };
+                    p2 = { x: other.x - (otAc.Span*SCALE/2), y: other.y + (otAc.NoseToPivot*SCALE) };
+                } else { // จอดขนาน: วัดปีกไปหัว/ท้าย
+                    p1 = { x: alloc.x + (myAc.Span*SCALE/2), y: alloc.y + (myAc.NoseToPivot*SCALE) };
+                    p2 = (Math.abs(p1.x - other.x) < Math.abs(p1.x - (other.x + otAc.Length*SCALE))) ? {x: other.x, y: other.y} : {x: other.x, y: other.y + otAc.Length*SCALE};
                 }
+
+                const dist = Math.sqrt(Math.pow(p1.x-p2.x,2) + Math.pow(p1.y-p2.y,2)) / SCALE;
+                layer.innerHTML += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" class="gap-line" />`;
+                layer.innerHTML += `<text x="${(p1.x+p2.x)/2}" y="${(p1.y+p2.y)/2 - 10}" class="gap-text" text-anchor="middle">${dist.toFixed(2)}m</text>`;
             }
         });
     }
 
-    function checkCollision(alloc, idx, margin) {
+    function checkCollision(alloc, idx) {
         const ac = db.aircrafts.find(a => a.Model === alloc.model);
-        const reach = (ac.PivotOffset + ac.SweepRadius + margin);
+        const reach = ac.PivotOffset + ac.SweepRadius;
         return allocations.some((other, otIdx) => {
             if (idx === otIdx) return false;
             const oAc = db.aircrafts.find(a => a.Model === other.model);
@@ -308,38 +293,19 @@
         });
     }
 
-    function updateAudit(alloc, idx, margin) {
+    function updateAudit(alloc, idx) {
         const ac = db.aircrafts.find(a => a.Model === alloc.model);
-        const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
-        const totalReach = ac.PivotOffset + ac.SweepRadius + margin;
+        const float = document.getElementById('audit-float');
+        float.style.display = 'block';
         
-        // ค้นหาเพื่อนบ้านที่ใกล้ที่สุดในทิศทางเลี้ยว
-        let neighbor = null, minDist = Infinity;
-        allocations.forEach((other, otIdx) => {
-            if (idx === otIdx) return;
-            const d = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
-            if (d < minDist) { minDist = d; neighbor = other; }
-        });
-
-        let content = `<div class="audit-card"><b>📍 หลุม: ${alloc.standId} (${ac.Model})</b><br>`;
-        content += `ทิศทาง: ${alloc.turnMode === 0 ? 'เลี้ยวขวา ➡️' : 'เลี้ยวซ้าย ⬅️'} | หมุน: ${alloc.rotation}°<hr>`;
-        
-        if (neighbor) {
-            const oAc = db.aircrafts.find(a => a.Model === neighbor.model);
-            const staticGap = minDist - (ac.Span/2 + oAc.Span/2);
-            const dynamicGap = minDist - (totalReach + oAc.Span/2);
-            const isDanger = dynamicGap < 0 || staticGap < rule.MinClearance;
-
-            content += `อากาศยานข้างเคียง: <b>${neighbor.model}</b><br>`;
-            content += `<span class="formula">1. Static Gap (จอด): ${staticGap.toFixed(2)}m (ICAO Min: ${rule.MinClearance}m)</span>`;
-            content += `<span class="formula">2. Dynamic Gap (เลี้ยว): ${dynamicGap.toFixed(2)}m</span>`;
-            content += `<div class="res-box" style="border-color:${isDanger?'var(--danger)':'var(--safe)'}; color:${isDanger?'var(--danger)':'var(--safe)'}">`;
-            content += `${isDanger ? '❌ ไม่ผ่านมาตรฐาน' : '✅ ผ่านการตรวจสอบ'}</div>`;
-        } else {
-            content += `<p style="text-align:center; padding:20px;">ไม่พบอากาศยานใกล้เคียง</p>`;
-        }
-        content += `</div>`;
-        document.getElementById('audit-content').innerHTML = content;
+        document.getElementById('audit-content').innerHTML = `
+            <h3>📍 รายละเอียด: ${alloc.standId}</h3>
+            <b>เครื่องบิน:</b> ${ac.Model} (Code ${ac.Code})<br>
+            <b>องศาจอด:</b> ${alloc.rotation}°<br>
+            <b>ทิศทางเลี้ยว:</b> ${alloc.turnMode === 0 ? 'Right Turn' : 'Left Turn'}<hr>
+            <span class="formula">รัศมีกวาด (R4): ${ac.SweepRadius}m</span>
+            <span class="formula">พิกัด Nose Gear: X=${alloc.x.toFixed(0)}, Y=${alloc.y.toFixed(0)}</span>
+        `;
     }
 
     function cancelSelection() {
