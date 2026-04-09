@@ -179,37 +179,45 @@ function dragElement(elmnt) {
         return pt.matrixTransform(svg.getScreenCTM().inverse());
     }
 
-    function handleSvgClick(e) {
-        if (!selectedAC) return;
-        const pt = getSvgPt(e);
-        const mode = document.getElementById('place-mode').value;
-        let bestSt = null, snapX = pt.x, snapY = pt.y;
+   function handleSvgClick(e) {
+    if (!selectedAC) return;
+    const pt = getSvgPt(e);
+    const mode = document.getElementById('place-mode').value;
+    let bestSt = null, snapX = pt.x, snapY = pt.y;
 
-        const sorted = [...db.stands].sort((a,b) => (b.ParentID?1:0) - (a.ParentID?1:0));
-        for (let st of sorted) {
-            const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
-            if (pt.x >= cx - hw && pt.x <= cx + hw) {
-                bestSt = st.StandID;
-                if (mode === 'snap') {
-                    const t1 = HEADER_Y + (12.5*SCALE), t2 = HEADER_Y + (30*SCALE);
-                    snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
-                    snapX = cx;
-                }
-                break;
+    const sorted = [...db.stands].sort((a,b) => (b.ParentID?1:0) - (a.ParentID?1:0));
+    for (let st of sorted) {
+        const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
+        if (pt.x >= cx - hw && pt.x <= cx + hw) {
+            bestSt = st.StandID;
+            if (mode === 'snap') {
+                const t1 = HEADER_Y + (12.5*SCALE), t2 = HEADER_Y + (30*SCALE);
+                snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
+                snapX = cx;
             }
-        }
-
-        if (bestSt) {
-            const st = db.stands.find(s => s.StandID === bestSt);
-            const minY = HEADER_Y + (12.5*SCALE), maxY = HEADER_Y + (st.Length-12.5)*SCALE;
-            if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
-
-            allocations.push({ id: Date.now(), standId: bestSt, model: selectedAC.Model, x: snapX, y: snapY, rotation: currentRotation, turnMode: 0 });
-            activeIdx = allocations.length - 1;
-            cancelSelection();
-            draw();
+            break;
         }
     }
+
+    if (bestSt) {
+        const st = db.stands.find(s => s.StandID === bestSt);
+        const minY = HEADER_Y + (12.5*SCALE), maxY = HEADER_Y + (st.Length-12.5)*SCALE;
+        if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
+
+        allocations.push({ 
+            id: Date.now(), 
+            standId: bestSt, 
+            model: selectedAC.Model, 
+            x: snapX, y: snapY, 
+            rotation: currentRotation, 
+            turnMode: 0 
+        });
+        activeIdx = allocations.length - 1;
+        cancelSelection();
+        draw(); // วาดทันที
+        updateAudit(allocations[activeIdx], activeIdx); // แสดงพาแนลทันที
+    }
+}
 
     function draw() {
         const bg = document.getElementById('bg-layer');
@@ -266,7 +274,7 @@ function dragElement(elmnt) {
             sw.innerHTML += `<circle cx="${pivotX}" cy="${pivotY}" class="pivot-dot" />`;
 
             // Draw Dynamic Gap
-            calculateAndDrawGaps(sw, alloc, idx);
+            drawSpecificGap(sw, alloc, idx);
         });
 
         if (activeIdx !== null && allocations[activeIdx]) updateAudit(allocations[activeIdx], activeIdx);
@@ -281,11 +289,11 @@ function syncRot(val, target) {
 
 // 2. ปรับปรุงการวาด Arc ให้เป็น 180 องศาด้านบน (Nose side)
 function drawArc(layer, px, py, r, isRight, isDanger, rot) {
-    const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)' ;
+    const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
     const baseRad = (rot - 90) * Math.PI / 180;
     
-    // คำนวณจุดเริ่มต้น (ปีกข้างนึง) และจุดจบ (ปีกอีกข้างนึง) โดยกวาดผ่านด้านหน้า
-    // ถ้าเลี้ยวขวา (Right): หมุนรอบ RH -> กวาดจากปีกซ้ายขึ้นไป
+    // คำนวณมุม: เลี้ยวขวา (Right) กวาดจากซ้ายไปขวา | เลี้ยวซ้าย (Left) กวาดจากขวาไปซ้าย
+    // 0 องศาของ Arc เริ่มที่ทิศตะวันออก (ขวา) ของจุดหมุน
     const startAngle = isRight ? baseRad + Math.PI : baseRad; 
     const endAngle = isRight ? baseRad : baseRad - Math.PI;
 
@@ -294,7 +302,9 @@ function drawArc(layer, px, py, r, isRight, isDanger, rot) {
     const endX = px + Math.cos(endAngle) * r;
     const endY = py + Math.sin(endAngle) * r;
 
+    // large-arc-flag = 0, sweep-flag: Right = 1 (CW), Left = 0 (CCW)
     const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${isRight ? 1 : 0} ${endX} ${endY}`;
+    
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
     p.setAttribute("class", `swing-path ${isDanger?'unsafe':'safe'}`);
@@ -303,43 +313,39 @@ function drawArc(layer, px, py, r, isRight, isDanger, rot) {
 }
 
    // 3. ปรับปรุงการคำนวณระยะห่างจุดที่ใกล้ที่สุด (Smart Gap)
-function calculateAndDrawGaps(layer, alloc, idx) {
+function drawSpecificGap(layer, alloc, idx) {
     const myAc = db.aircrafts.find(a => a.Model === alloc.model);
-    const myStand = db.stands.find(s => s.StandID === alloc.standId);
-
+    
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
-        const otAc = db.aircrafts.find(a => a.Model === other.model);
         
-        // เช็คเฉพาะหลุมข้างเคียง
+        // กฎ: วาดเฉพาะเครื่องที่จอดอยู่ในระยะประชิด (ไม่เกิน 2 หลุม) และวาดจากซ้ายไปขวาเพื่อไม่ให้เส้นซ้ำ
         const distCenter = Math.abs(alloc.x - other.x) / SCALE;
-        if (distCenter > (myAc.Span + otAc.Span)) return;
+        if (distCenter < 100 && alloc.x < other.x) {
+            const otAc = db.aircrafts.find(a => a.Model === other.model);
+            
+            // พิกัดปีกขวาของเรา และปีกซ้ายของเขา
+            const x1 = alloc.x + (myAc.Span * SCALE / 2);
+            const y1 = alloc.y + (myAc.NoseToPivot * SCALE);
+            const x2 = other.x - (otAc.Span * SCALE / 2);
+            const y2 = other.y + (otAc.NoseToPivot * SCALE);
 
-        // จุดพิจารณาของเครื่องข้างๆ (หัว, ท้าย, ปีกซ้าย, ปีกขวา)
-        const radOther = (other.rotation - 90) * Math.PI / 180;
-        const otherPoints = [
-            {x: other.x, y: other.y}, // หัว
-            {x: other.x - Math.cos(radOther)*(otAc.Length*SCALE), y: other.y - Math.sin(radOther)*(otAc.Length*SCALE)}, // ท้าย
-            {x: other.x + Math.cos(radOther + Math.PI/2)*(otAc.Span*SCALE/2), y: other.y + Math.sin(radOther + Math.PI/2)*(otAc.Span*SCALE/2)}, // ปีกซ้าย
-            {x: other.x - Math.cos(radOther + Math.PI/2)*(otAc.Span*SCALE/2), y: other.y - Math.sin(radOther + Math.PI/2)*(otAc.Span*SCALE/2)}  // ปีกขวา
-        ];
+            const gap = (x2 - x1) / SCALE;
 
-        // จุดที่ใกล้ที่สุดจากปีกเราไปเครื่องข้างๆ
-        const myWingX = (other.x > alloc.x) ? alloc.x + (myAc.Span*SCALE/2) : alloc.x - (myAc.Span*SCALE/2);
-        const myWingY = alloc.y + (myAc.NoseToPivot * SCALE);
-        
-        let minDist = Infinity;
-        let targetPt = otherPoints[0];
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+            line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+            line.setAttribute("class", "wing-gap-line");
+            line.setAttribute("style", "stroke: #3498db; stroke-width: 2; stroke-dasharray: 5;");
+            layer.appendChild(line);
 
-        otherPoints.forEach(pt => {
-            const d = Math.sqrt(Math.pow(myWingX - pt.x, 2) + Math.pow(myWingY - pt.y, 2));
-            if (d < minDist) { minDist = d; targetPt = pt; }
-        });
-
-        const realGap = minDist / SCALE;
-        if (alloc.x < other.x) { // วาดเส้นบอกระยะห่าง
-            layer.innerHTML += `<line x1="${myWingX}" y1="${myWingY}" x2="${targetPt.x}" y2="${targetPt.y}" class="gap-line" />`;
-            layer.innerHTML += `<text x="${(myWingX+targetPt.x)/2}" y="${(myWingY+targetPt.y)/2 - 5}" class="gap-text" text-anchor="middle">${realGap.toFixed(2)}m</text>`;
+            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            text.setAttribute("x", (x1 + x2) / 2);
+            text.setAttribute("y", (y1 + y2) / 2 - 10);
+            text.setAttribute("class", "wing-gap-text");
+            text.setAttribute("text-anchor", "middle");
+            text.textContent = gap.toFixed(2) + "m";
+            layer.appendChild(text);
         }
     });
 }
@@ -361,45 +367,90 @@ function updateAudit(alloc, idx) {
     const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
     const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
     
-    // รัศมีกวาดรวม (R_Total = PivotOffset + R4 + ExtraMargin)
-    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
-    
+    // 1. บังคับเปิดพาแนลทุกครั้งที่เรียก (แก้บั๊กปิดแล้วเปิดไม่ได้)
     const float = document.getElementById('audit-float');
     float.style.display = 'block';
 
-    // ค้นหา Net Clearance
+    // 2. คำนวณรัศมีกวาดรวม (R_Total = PivotOffset + R4 + ExtraMargin)
+    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
+    
+    // 3. ค้นหาเครื่องบินข้างเคียงในทิศทางที่จะเลี้ยว
     let neighbor = null, minDist = Infinity;
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
-        const d = Math.abs(alloc.x - other.x) / SCALE;
+        
+        // ตรรกะการหาเพื่อนบ้าน: 
+        // ถ้าเลี้ยวขวา (mode 0) เช็คเครื่องที่อยู่ทางขวา (other.x > alloc.x)
+        // ถ้าเลี้ยวซ้าย (mode 1) เช็คเครื่องที่อยู่ทางซ้าย (other.x < alloc.x)
         const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
-        if (isToward && d < minDist) { minDist = d; neighbor = other; }
+        const d = Math.abs(alloc.x - other.x) / SCALE;
+        
+        if (isToward && d < minDist) { 
+            minDist = d; 
+            neighbor = other; 
+        }
     });
 
-    let netClearanceText = "N/A";
+    // 4. เตรียมข้อมูลแสดงผล
+    let auditHTML = `
+        <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:15px;">
+            <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
+            <b>รุ่น:</b> ${ac.Model} (Type ${ac.Code}) | <b>ทิศทาง:</b> ${alloc.turnMode === 0 ? 'เลี้ยวขวา ➡️' : 'เลี้ยวซ้าย ⬅️'}
+        </div>
+
+        <div class="audit-card" style="border-left-color: var(--accent);">
+            <b>1. การคำนวณรัศมีการกวาด:</b>
+            <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
+            <b style="color:var(--accent); font-size:1.1em;">รวมระยะเหวี่ยง = ${totalReach.toFixed(2)} เมตร</b>
+        </div>
+    `;
+
     if (neighbor) {
         const otAc = db.aircrafts.find(a => a.Model === neighbor.model);
-        const gapVal = minDist - (totalReach + (otAc.Span/2));
-        netClearanceText = `${gapVal.toFixed(2)} ม. ${gapVal < 0 ? '❌ ชน' : '✅ พ้น'}`;
+        
+        // คำนวณระยะห่างขณะเลี้ยว (Dynamic)
+        // สูตร: (ระยะห่างหลุม) - (ระยะเหวี่ยงเรา + ครึ่งปีกเขา)
+        const dynamicGap = minDist - (totalReach + (otAc.Span / 2));
+        
+        // คำนวณระยะห่างขณะจอดนิ่ง (Static)
+        // สูตร: (ระยะห่างหลุม) - (ครึ่งปีกเรา + ครึ่งปีกเขา)
+        const staticGap = minDist - (ac.Span / 2 + otAc.Span / 2);
+        
+        const isSafe = (dynamicGap >= 0) && (staticGap >= rule.MinClearance);
+
+        auditHTML += `
+            <div class="audit-card" style="border-left-color: ${dynamicGap < 0 ? 'var(--danger)' : 'var(--safe)'}">
+                <b>2. ระยะห่างขณะเลี้ยว (Dynamic):</b>
+                <span class="formula">เทียบกับ: ${neighbor.model} (${neighbor.standId})</span>
+                <span class="formula">ระยะห่าง Center: ${minDist.toFixed(2)}m</span>
+                <span class="formula">ระยะเหวี่ยง + ครึ่งปีกข้างเคียง: ${(totalReach + otAc.Span/2).toFixed(2)}m</span>
+                <b style="color:${dynamicGap < 0 ? 'var(--danger)' : 'var(--safe)'}">
+                    ผลลัพธ์: ${dynamicGap.toFixed(2)} เมตร ${dynamicGap < 0 ? '❌ ชน' : '✅ พ้น'}
+                </b>
+            </div>
+
+            <div class="audit-card" style="border-left-color: ${staticGap < rule.MinClearance ? 'var(--danger)' : 'var(--safe)'}">
+                <b>3. ระยะห่างปีกขณะจอด (Static):</b>
+                <span class="formula">เกณฑ์ Type ${ac.Code}: ต้องห่างอย่างน้อย ${rule.MinClearance} เมตร</span>
+                <b style="color:${staticGap < rule.MinClearance ? 'var(--danger)' : 'var(--safe)'}">
+                    ระยะจริง: ${staticGap.toFixed(2)} เมตร ${staticGap < rule.MinClearance ? '❌ ต่ำกว่าเกณฑ์' : '✅ ผ่าน'}
+                </b>
+            </div>
+
+            <div class="res-box" style="background:${isSafe ? 'rgba(46, 204, 113, 0.2)' : 'rgba(231, 76, 60, 0.2)'}; border-color:${isSafe ? 'var(--safe)' : 'var(--danger)'}; color:${isSafe ? 'var(--safe)' : 'var(--danger)'}">
+                ${isSafe ? '✅ ปลอดภัยตามมาตรฐาน' : '❌ ตรวจพบจุดอันตราย'}
+            </div>
+        `;
+    } else {
+        auditHTML += `
+            <div style="text-align:center; padding:30px; border:1px dashed #666; border-radius:10px; color:#aaa;">
+                ไม่พบอากาศยานจอดอยู่ในทิศทางที่เลี้ยวไป<br>
+                <b style="color:var(--safe);">✅ สามารถเลี้ยวออกได้อิสระ</b>
+            </div>
+        `;
     }
 
-    document.getElementById('audit-content').innerHTML = `
-        <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:10px;">
-            <b style="font-size:1.2em; color:var(--accent);">📍 ${alloc.standId}</b><br>
-            <b>รุ่น:</b> ${ac.Model} (Type ${ac.Code})
-        </div>
-        <b>1. การคำนวณรัศมีการกวาด:</b>
-        <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
-        <b style="color:var(--accent);">รวม = ${totalReach.toFixed(2)} เมตร</b><br><br>
-        
-        <b>2. ระยะห่างขณะเลี้ยว (Net Clearance):</b>
-        <span class="formula">ระยะห่าง Center-to-Center: ${neighbor ? minDist.toFixed(2) : '-'} ม.</span>
-        <b style="font-size:1.1em;">เหลือจริง: ${netClearanceText}</b><br><br>
-
-        <b>3. ระยะห่างปีกขณะจอด (Static):</b>
-        <span class="formula">เกณฑ์มาตรฐาน Type ${ac.Code}: ห้ามต่ำกว่า ${rule.MinClearance} เมตร</span>
-        <span style="font-size:0.9em; color:#aaa;">*ใช้ตรวจสอบเทียบกับเส้นประสีฟ้าบนแผนผัง</span>
-    `;
+    document.getElementById('audit-content').innerHTML = auditHTML;
 }
 
     function cancelSelection() {
