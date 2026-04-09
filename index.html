@@ -105,17 +105,18 @@
     const SCALE = 4, HEADER_Y = 100;
 dragElement(document.getElementById("audit-float"));
 
+// คลิกเลือกเครื่องบินจากคลัง
 function selectAC(ac, el) {
     document.querySelectorAll('.ac-item').forEach(i => i.classList.remove('selected'));
     el.classList.add('selected');
     selectedAC = ac;
     
-    // แสดงเงาเครื่องบินทันที
+    // แสดงเงาเครื่องบินติดตามเมาส์ทันที
     const ghost = document.getElementById('ghost-group');
-    ghost.style.display = 'block'; 
+    if (ghost) ghost.style.display = 'block'; 
     document.getElementById('cancel-btn').style.display = 'block';
     
-    updateRotPreview(currentRotation); // คำนวณขนาดเงาทันที
+    updateRotPreview(currentRotation); 
 }
 function dragElement(elmnt) {
   var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
@@ -191,19 +192,21 @@ function dragElement(elmnt) {
         return pt.matrixTransform(svg.getScreenCTM().inverse());
     }
 
- function handleSvgClick(e) {
+// --- 2. ฟังก์ชันคลิกวางเครื่องบิน (แก้ไขให้แสดงผลและเปิดพาแนลทันที) ---
+function handleSvgClick(e) {
     if (!selectedAC) return;
     const pt = getSvgPt(e);
     const mode = document.getElementById('place-mode').value;
     let bestSt = null, snapX = pt.x, snapY = pt.y;
 
+    // MARS Logic: หาหลุมย่อยก่อนหลุมหลัก
     const sorted = [...db.stands].sort((a,b) => (b.ParentID?1:0) - (a.ParentID?1:0));
     for (let st of sorted) {
         const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
         if (pt.x >= cx - hw && pt.x <= cx + hw) {
             bestSt = st.StandID;
             if (mode === 'snap') {
-                const t1 = HEADER_Y + (12.5*SCALE), t2 = HEADER_Y + (30*SCALE);
+                const t1 = HEADER_Y + (12.5 * SCALE), t2 = HEADER_Y + (30 * SCALE);
                 snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
                 snapX = cx;
             }
@@ -213,24 +216,29 @@ function dragElement(elmnt) {
 
     if (bestSt && snapY) {
         const st = db.stands.find(s => s.StandID === bestSt);
-        const minY = HEADER_Y + (12.5*SCALE), maxY = HEADER_Y + (st.Length-12.5)*SCALE;
-        if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
+        const minY = HEADER_Y + (12.5 * SCALE), maxY = HEADER_Y + (st.Length - 12.5) * SCALE;
+        
+        if (snapY < minY || snapY > maxY) { 
+            alert("⚠️ ตำแหน่ง Nose Gear อยู่นอกเขตปลอดภัย (ห้ามจอดใกล้ Header/Tail 12.5ม.)"); 
+            return; 
+        }
 
         const newAlloc = { 
             id: Date.now(), 
             standId: bestSt, 
             model: selectedAC.Model, 
-            x: snapX, y: snapY, 
+            x: snapX, 
+            y: snapY, 
             rotation: currentRotation, 
-            turnMode: 0 
+            turnMode: 0 // เริ่มต้นที่เลี้ยวขวา
         };
         
         allocations.push(newAlloc);
-        activeIdx = allocations.length - 1;
+        activeIdx = allocations.length - 1; // กำหนดให้เครื่องที่เพิ่งวางเป็นเครื่องที่ถูกเลือก (Active)
         
-        cancelSelection();
-        draw(); // วาดทุกอย่างใหม่รวมถึงเครื่องที่เพิ่งวาง
-        updateAudit(newAlloc, activeIdx); // บั๊กที่ 2: เรียกใช้ฟังก์ชันรายละเอียดทันที
+        cancelSelection(); // ปิดสถานะการเลือกจากคลัง
+        draw(); // วาดเครื่องทุกลำใหม่ทันที
+        updateAudit(newAlloc, activeIdx); // เปิดและแสดงข้อมูลพาแนลทันที
     }
 }
 
@@ -303,12 +311,14 @@ function syncRot(val, target) {
 }
 
 // 2. ปรับปรุงการวาด Arc ให้เป็น 180 องศาด้านบน (Nose side)
+// --- 3. ฟังก์ชันวาดรัศมีกวาด 180 องศาด้านบน (แก้ไขพิกัดให้เป๊ะตามรูป) ---
 function drawArc(layer, px, py, r, isRightTurn, isDanger, rot) {
     const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
+    // baseRad คือทิศทางหัวเครื่อง (ปกติคือ -90 องศา ถ้าไม่ได้หมุน)
     const baseRad = (rot - 90) * Math.PI / 180;
     
-    // จุดเริ่ม (ปีกด้านหนึ่ง) และจุดจบ (ปีกอีกด้านหนึ่ง) 
-    // กวาดโค้ง 180 องศาผ่านด้านหน้าหัวเครื่อง
+    // เลี้ยวขวา (RH Pivot): กวาดจากปีกซ้าย (หมุนตามเข็ม) ไปจบด้านหน้า/ขวา
+    // เลี้ยวซ้าย (LH Pivot): กวาดจากปีกขวา (หมุนทวนเข็ม) ไปจบด้านหน้า/ซ้าย
     const startAngle = isRightTurn ? baseRad + Math.PI : baseRad; 
     const endAngle = isRightTurn ? baseRad : baseRad - Math.PI;
 
@@ -317,36 +327,36 @@ function drawArc(layer, px, py, r, isRightTurn, isDanger, rot) {
     const endX = px + Math.cos(endAngle) * r;
     const endY = py + Math.sin(endAngle) * r;
 
-    // sweep-flag: 1 คือตามเข็ม (เลี้ยวขวา), 0 คือทวนเข็ม (เลี้ยวซ้าย)
+    // sweep-flag: 1 คือ CW (เลี้ยวขวา), 0 คือ CCW (เลี้ยวซ้าย)
     const sweepFlag = isRightTurn ? 1 : 0;
     const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${sweepFlag} ${endX} ${endY}`;
     
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
-    p.setAttribute("class", `swing-path ${isDanger?'unsafe':'safe'}`);
-    p.setAttribute("style", `marker-end: ${marker}; fill: none;`);
+    p.setAttribute("class", `swing-path ${isDanger ? 'unsafe' : 'safe'}`);
+    p.setAttribute("style", `marker-end: ${marker}; fill: none; pointer-events: none;`);
     layer.appendChild(p);
 }
 
-   // 3. ปรับปรุงการคำนวณระยะห่างจุดที่ใกล้ที่สุด (Smart Gap)
+// --- 4. ฟังก์ชันวาดระยะห่างปลายปีก (แก้ไขให้แสดงผล) ---
 function drawSpecificGap(layer, alloc, idx) {
     const myAc = db.aircrafts.find(a => a.Model === alloc.model);
-    
+    if (!myAc) return;
+
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
         
-        // กฎ: วาดเฉพาะเครื่องที่จอดอยู่ในระยะประชิด (ไม่เกิน 2 หลุม) และวาดจากซ้ายไปขวาเพื่อไม่ให้เส้นซ้ำ
         const distCenter = Math.abs(alloc.x - other.x) / SCALE;
+        // วาดเฉพาะถ้าจอดในหลุมใกล้กัน และวาดจากซ้ายไปขวาเพื่อกันเส้นทับซ้อน
         if (distCenter < 100 && alloc.x < other.x) {
             const otAc = db.aircrafts.find(a => a.Model === other.model);
             
-            // พิกัดปีกขวาของเรา และปีกซ้ายของเขา
             const x1 = alloc.x + (myAc.Span * SCALE / 2);
             const y1 = alloc.y + (myAc.NoseToPivot * SCALE);
             const x2 = other.x - (otAc.Span * SCALE / 2);
             const y2 = other.y + (otAc.NoseToPivot * SCALE);
 
-            const gap = (x2 - x1) / SCALE;
+            const gapValue = (x2 - x1) / SCALE;
 
             const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
             line.setAttribute("x1", x1); line.setAttribute("y1", y1);
@@ -355,13 +365,13 @@ function drawSpecificGap(layer, alloc, idx) {
             line.setAttribute("style", "stroke: #3498db; stroke-width: 2; stroke-dasharray: 5;");
             layer.appendChild(line);
 
-            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            text.setAttribute("x", (x1 + x2) / 2);
-            text.setAttribute("y", (y1 + y2) / 2 - 10);
-            text.setAttribute("class", "wing-gap-text");
-            text.setAttribute("text-anchor", "middle");
-            text.textContent = gap.toFixed(2) + "m";
-            layer.appendChild(text);
+            const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            txt.setAttribute("x", (x1 + x2) / 2);
+            txt.setAttribute("y", (y1 + y2) / 2 - 10);
+            txt.setAttribute("class", "wing-gap-text");
+            txt.setAttribute("text-anchor", "middle");
+            txt.textContent = gapValue.toFixed(2) + "m";
+            layer.appendChild(txt);
         }
     });
 }
@@ -377,40 +387,34 @@ function drawSpecificGap(layer, alloc, idx) {
         });
     }
 
-    // 4. ปรับปรุง Audit Panel ให้แสดงรายละเอียดตามที่ต้องการ
+// --- 5. ฟังก์ชันแสดงรายละเอียดพาแนล (แก้ไขให้สมบูรณ์และบังคับเปิด) ---
 function updateAudit(alloc, idx) {
-    if (!alloc) return; // กัน Error กรณีข้อมูลว่าง
+    if (!alloc) return;
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
     const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
     const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
     
-    // 1. บังคับเปิดพาแนลทุกครั้งที่เรียก (แก้บั๊กปิดแล้วเปิดไม่ได้)
+    // บังคับโชว์พาแนลทุกครั้งที่เรียก (แก้บั๊กปิดแล้วเปิดไม่ได้)
     const float = document.getElementById('audit-float');
     float.style.display = 'block';
 
-    // 2. คำนวณรัศมีกวาดรวม
     const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
     
-    // 3. ค้นหาเครื่องบินข้างเคียง
     let neighbor = null, minDist = Infinity;
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
         const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
         const d = Math.abs(alloc.x - other.x) / SCALE;
-        if (isToward && d < minDist) { 
-            minDist = d; 
-            neighbor = other; 
-        }
+        if (isToward && d < minDist) { minDist = d; neighbor = other; }
     });
 
-    // 4. เตรียมข้อมูลแสดงผล (คงเดิมตามที่คุณส่งมา)
     let auditHTML = `
         <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:15px;">
             <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
             <b>รุ่น:</b> ${ac.Model} (Type ${ac.Code}) | <b>ทิศทาง:</b> ${alloc.turnMode === 0 ? 'เลี้ยวขวา ➡️' : 'เลี้ยวซ้าย ⬅️'}
         </div>
 
-        <div class="audit-card" style="border-left-color: var(--accent);">
+        <div class="audit-card">
             <b>1. การคำนวณรัศมีการกวาด:</b>
             <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
             <b style="color:var(--accent); font-size:1.1em;">รวมระยะเหวี่ยง = ${totalReach.toFixed(2)} เมตร</b>
@@ -427,32 +431,23 @@ function updateAudit(alloc, idx) {
             <div class="audit-card" style="border-left-color: ${dynamicGap < 0 ? 'var(--danger)' : 'var(--safe)'}">
                 <b>2. ระยะห่างขณะเลี้ยว (Dynamic):</b>
                 <span class="formula">เทียบกับ: ${neighbor.model} (${neighbor.standId})</span>
-                <span class="formula">ระยะห่าง Center: ${minDist.toFixed(2)}m</span>
-                <span class="formula">ระยะเหวี่ยง + ครึ่งปีกข้างเคียง: ${(totalReach + otAc.Span/2).toFixed(2)}m</span>
                 <b style="color:${dynamicGap < 0 ? 'var(--danger)' : 'var(--safe)'}">
                     ผลลัพธ์: ${dynamicGap.toFixed(2)} เมตร ${dynamicGap < 0 ? '❌ ชน' : '✅ พ้น'}
                 </b>
             </div>
-
             <div class="audit-card" style="border-left-color: ${staticGap < rule.MinClearance ? 'var(--danger)' : 'var(--safe)'}">
                 <b>3. ระยะห่างปีกขณะจอด (Static):</b>
-                <span class="formula">เกณฑ์ Type ${ac.Code}: ต้องห่างอย่างน้อย ${rule.MinClearance} เมตร</span>
+                <span class="formula">เกณฑ์มาตรฐาน: ${rule.MinClearance} เมตร</span>
                 <b style="color:${staticGap < rule.MinClearance ? 'var(--danger)' : 'var(--safe)'}">
-                    ระยะจริง: ${staticGap.toFixed(2)} เมตร ${staticGap < rule.MinClearance ? '❌ ต่ำกว่าเกณฑ์' : '✅ ผ่าน'}
+                    ระยะจริง: ${staticGap.toFixed(2)} เมตร
                 </b>
             </div>
-
-            <div class="res-box" style="background:${isSafe ? 'rgba(46, 204, 113, 0.2)' : 'rgba(231, 76, 60, 0.2)'}; border-color:${isSafe ? 'var(--safe)' : 'var(--danger)'}; color:${isSafe ? 'var(--safe)' : 'var(--danger)'}">
+            <div class="res-box" style="background:${isSafe ? 'rgba(46,204,113,0.2)' : 'rgba(231,76,60,0.2)'}; color:${isSafe ? 'var(--safe)' : 'var(--danger)'}">
                 ${isSafe ? '✅ ปลอดภัยตามมาตรฐาน' : '❌ ตรวจพบจุดอันตราย'}
             </div>
         `;
     } else {
-        auditHTML += `
-            <div style="text-align:center; padding:30px; border:1px dashed #666; border-radius:10px; color:#aaa;">
-                ไม่พบอากาศยานจอดอยู่ในทิศทางที่เลี้ยวไป<br>
-                <b style="color:var(--safe);">✅ สามารถเลี้ยวออกได้อิสระ</b>
-            </div>
-        `;
+        auditHTML += `<div style="text-align:center; padding:20px; color:#aaa; border:1px dashed #666;">ไม่พบเครื่องบินในทิศทางการเลี้ยว</div>`;
     }
 
     document.getElementById('audit-content').innerHTML = auditHTML;
