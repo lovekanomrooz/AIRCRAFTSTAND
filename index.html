@@ -117,9 +117,19 @@ function selectAC(ac, el) {
     el.classList.add('selected');
     selectedAC = ac;
     
+    // บังคับแสดงเงาเครื่องบินติดตามเมาส์ทันที
     const ghost = document.getElementById('ghost-group');
-    ghost.style.display = 'block'; // แสดงเงาทันที
-    updateRotPreview(currentRotation); // อัปเดตรูปร่างเงา
+    ghost.style.display = 'block'; 
+    
+    // อัปเดตรูปร่างเงาให้เป็นสีขาวตามต้องการ
+    const span = ac.Span * SCALE, n2p = ac.NoseToPivot * SCALE, len = ac.Length * SCALE;
+    document.getElementById('ghost-wing').setAttribute("d", `M 0,${n2p} L ${-span/2},${n2p+10} L ${span/2},${n2p+10} Z`);
+    document.getElementById('ghost-wing').style.fill = "#ffffff"; // ปีกเงาสีขาว
+    document.getElementById('ghost-body').setAttribute("x", -span/16);
+    document.getElementById('ghost-body').setAttribute("width", span/8);
+    document.getElementById('ghost-body').setAttribute("height", len);
+    
+    document.getElementById('cancel-btn').style.display = 'block';
 }
 function dragElement(elmnt) {
   var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
@@ -252,43 +262,44 @@ function handleSvgClick(e) {
         });
 
         // 2. วาดเครื่องบิน
-        allocations.forEach((alloc, idx) => {
-            const ac = db.aircrafts.find(a => a.Model === alloc.model);
-            const rad = (alloc.rotation - 90) * Math.PI / 180;
-            const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE, r = ac.SweepRadius * SCALE;
-            
-            const mlgCx = alloc.x - Math.cos(rad) * pDist;
-            const mlgCy = alloc.y - Math.sin(rad) * pDist;
+         allocations.forEach((alloc, idx) => {
+        const ac = db.aircrafts.find(a => a.Model === alloc.model);
+        const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE;
+        const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
+        const r = (ac.SweepRadius + extraMargin) * SCALE;
+        const mlgY = alloc.y + pDist;
 
-            const isDanger = checkCollision(alloc, idx);
+        const isDanger = checkSafety(alloc, idx, extraMargin);
 
-            // Swing Path (180 Arc Top)
-            const pivotX = (alloc.turnMode === 0) ? mlgCx + Math.cos(rad+Math.PI/2)*pOff : mlgCx - Math.cos(rad+Math.PI/2)*pOff;
-            const pivotY = (alloc.turnMode === 0) ? mlgCy + Math.sin(rad+Math.PI/2)*pOff : mlgCy - Math.sin(rad+Math.PI/2)*pOff;
-            drawArc(sw, pivotX, pivotY, r, alloc.turnMode === 0, isDanger, alloc.rotation);
+        // วาดรัศมี: เลี้ยวขวาใช้ล้อขวา(RH)เป็นจุดหมุน / เลี้ยวซ้ายใช้ล้อซ้าย(LH)
+        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
+        drawArc(sw, pivotX, mlgY, r, alloc.turnMode === 0, isDanger, alloc.rotation);
 
-            // Model
-            const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-            g.setAttribute("transform", `translate(${alloc.x}, ${alloc.y}) rotate(${alloc.rotation})`);
-            g.setAttribute("class", `ac-group ${activeIdx === idx ? 'active-ac' : ''}`);
-            g.innerHTML = `
-                <path d="M 0,${pDist} L ${-ac.Span*SCALE/2},${pDist+10} L ${ac.Span*SCALE/2},${pDist+10} Z" class="ac-wing" />
-                <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" class="ac-body" />
-                <circle cx="0" cy="0" r="4" fill="red" />
-            `;
-            g.onclick = (e) => { e.stopPropagation(); activeIdx = idx; alloc.turnMode = 1 - alloc.turnMode; draw(); };
-            g.ondblclick = (e) => { e.stopPropagation(); allocations.splice(idx, 1); activeIdx = null; draw(); };
-            acL.appendChild(g);
+        // วาดเครื่องบิน
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.setAttribute("transform", `translate(${alloc.x}, ${alloc.y}) rotate(${alloc.rotation})`);
+        g.setAttribute("class", `ac-group ${activeIdx === idx ? 'active-ac' : ''}`);
+        g.innerHTML = `
+            <path d="M 0,${pDist} L ${-ac.Span*SCALE/2},${pDist+10} L ${ac.Span*SCALE/2},${pDist+10} Z" style="fill: #ffffff; stroke: #333;" />
+            <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" fill="#fff" stroke="#333" />
+            <circle cx="0" cy="0" r="4" fill="red" /> <!-- Nose Gear -->
+            <circle cx="${alloc.turnMode === 0 ? pOff : -pOff}" cy="${pDist}" class="pivot-dot" /> <!-- Active Pivot -->
+        `;
+        
+        // คลิกเครื่องบิน: เปลี่ยนทิศเลี้ยว และเปิดพาแนล
+        g.onclick = (e) => { 
+            e.stopPropagation(); 
+            activeIdx = idx;
+            alloc.turnMode = 1 - alloc.turnMode; 
+            draw(); 
+            updateAudit(alloc, idx); 
+        };
+        acL.appendChild(g);
 
-            // Pivot Dot
-            sw.innerHTML += `<circle cx="${pivotX}" cy="${pivotY}" class="pivot-dot" />`;
-
-            // Draw Dynamic Gap
-            drawSpecificGap(sw, alloc, idx);
-        });
-
-        if (activeIdx !== null && allocations[activeIdx]) updateAudit(allocations[activeIdx], activeIdx);
-    }
+        // วาดเส้นวัดระยะห่าง (Gap) ฟอนต์สีขาว
+        drawSpecificGap(sw, alloc, idx);
+    });
+}
 
     // 1. ฟังก์ชัน Sync การหมุนระหว่าง Slider และ Input
 function syncRot(val, target) {
@@ -300,24 +311,28 @@ function syncRot(val, target) {
 // --- 3. วาดรัศมีกวาด 180 องศา (เริ่มจากปีกกวาดขึ้นบน) ---
 function drawArc(layer, px, py, r, isRightTurn, isDanger, rot) {
     const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
-    const baseRad = (rot - 90) * Math.PI / 180;
+    const baseRad = (rot - 90) * Math.PI / 180; // มุมหัวเครื่อง
     
-    // Start จากปีกด้านนอก (180 องศาจากทิศทางหัวเครื่อง)
-    const startAngle = isRightTurn ? baseRad + Math.PI : baseRad; 
-    const endAngle = isRightTurn ? baseRad : baseRad - Math.PI;
+    // คำนวณจุดบนระนาบปีก (Horizontal line relative to aircraft rotation)
+    // สำหรับ 180 องศา จุดเริ่มและจุดจบจะอยู่ตรงข้ามกันโดยมีจุดหมุนเป็นศูนย์กลาง
+    const angleFrom = isRightTurn ? baseRad + Math.PI : baseRad; 
+    const angleTo = isRightTurn ? baseRad : baseRad - Math.PI;
 
-    const startX = px + Math.cos(startAngle) * r;
-    const startY = py + Math.sin(startAngle) * r;
-    const endX = px + Math.cos(endAngle) * r;
-    const endY = py + Math.sin(endAngle) * r;
+    const startX = px + Math.cos(angleFrom) * r;
+    const startY = py + Math.sin(angleFrom) * r;
+    const endX = px + Math.cos(angleTo) * r;
+    const endY = py + Math.sin(angleTo) * r;
 
+    // sweep-flag: 1 คือ CW (เลี้ยวขวา), 0 คือ CCW (เลี้ยวซ้าย)
     const sweepFlag = isRightTurn ? 1 : 0;
+    
+    // วาด Arc 180 องศา กวาดจากข้างลำตัวผ่านด้านหน้าเครื่อง
     const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${sweepFlag} ${endX} ${endY}`;
     
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
-    p.setAttribute("class", `swing-path ${isDanger?'unsafe':'safe'}`);
-    p.setAttribute("style", `marker-end: ${marker}; fill: rgba(255,255,255,0.03); stroke-width: 3px;`);
+    p.setAttribute("class", `swing-path ${isDanger ? 'unsafe' : 'safe'}`);
+    p.setAttribute("style", `marker-end: ${marker}; fill: none; stroke-width: 3.5px;`);
     layer.appendChild(p);
 }
 
@@ -327,15 +342,15 @@ function drawSpecificGap(layer, alloc, idx) {
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
         const dist = Math.abs(alloc.x - other.x) / SCALE;
-        if (dist < 100 && alloc.x < other.x) {
+        if (dist < 120 && alloc.x < other.x) { // เฉพาะหลุมข้างเคียง
             const otAc = db.aircrafts.find(a => a.Model === other.model);
             const x1 = alloc.x + (myAc.Span * SCALE / 2);
             const x2 = other.x - (otAc.Span * SCALE / 2);
             const y = alloc.y + (myAc.NoseToPivot * SCALE);
-            const gapValue = (x2 - x1) / SCALE;
+            const gapVal = (x2 - x1) / SCALE;
 
-            layer.innerHTML += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" class="wing-gap-line" />`;
-            layer.innerHTML += `<text x="${(x1+x2)/2}" y="${y-10}" class="wing-gap-text" text-anchor="middle">${gapValue.toFixed(2)}m</text>`;
+            layer.innerHTML += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" class="wing-gap-line" style="stroke: #3498db; stroke-width: 2; stroke-dasharray: 5;" />`;
+            layer.innerHTML += `<text x="${(x1+x2)/2}" y="${y-10}" style="fill: #ffffff; font-weight: bold; font-size: 14px;" text-anchor="middle">${gapVal.toFixed(2)}m</text>`;
         }
     });
 }
@@ -357,57 +372,45 @@ function updateAudit(alloc, idx) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
     const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
     const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
-    
+    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
+
     document.getElementById('audit-float').style.display = 'block';
 
-    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
-    
     let neighbor = null, minDist = Infinity;
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
-        const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
         const d = Math.abs(alloc.x - other.x) / SCALE;
+        const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
         if (isToward && d < minDist) { minDist = d; neighbor = other; }
     });
 
     let auditHTML = `
-        <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:15px;">
-            <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
-            <b>รุ่น:</b> ${ac.Model} | <b>ทิศทาง:</b> ${alloc.turnMode === 0 ? 'เลี้ยวขวา ➡️' : 'เลี้ยวซ้าย ⬅️'}
-        </div>
-        <div class="audit-card">
-            <b>1. การคำนวณรัศมีกวาดรวม (R_Total):</b>
-            <span class="formula">Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
-            <b style="color:var(--accent);">ระยะเหวี่ยงสุทธิ = ${totalReach.toFixed(2)} เมตร</b>
-        </div>
+        <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
+        รุ่น: ${ac.Model} | เลี้ยว: ${alloc.turnMode === 0 ? 'ขวา ➡️' : 'ซ้าย ⬅️'}<hr>
+        
+        <b>1. การคำนวณรัศมีการกวาด:</b>
+        <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
+        <b style="color:var(--accent);">รวม = ${totalReach.toFixed(2)} เมตร</b><br><br>
     `;
 
     if (neighbor) {
         const otAc = db.aircrafts.find(a => a.Model === neighbor.model);
-        const neighborHalfSpan = otAc.Span / 2;
-        
-        // แจกแจงสูตร Dynamic Gap
-        const dynamicGap = minDist - (totalReach + neighborHalfSpan);
-        const staticGap = minDist - (ac.Span / 2 + neighborHalfSpan);
-        const isSafe = (dynamicGap >= 0) && (staticGap >= rule.MinClearance);
+        const dynamicGap = minDist - (totalReach + (otAc.Span / 2));
+        const staticGap = minDist - (ac.Span / 2 + otAc.Span / 2);
 
         auditHTML += `
-            <div class="audit-card" style="border-left-color: ${dynamicGap < 0 ? 'red' : '#2ecc71'}">
-                <b>2. ระยะห่างขณะเลี้ยว (Dynamic):</b>
-                <span class="formula">สูตร: ระยะ Center - (R_Total + ครึ่งปีกเครื่องข้างๆ)</span>
-                <span class="formula">คำนวณ: ${minDist.toFixed(2)}m - (${totalReach.toFixed(2)}m + ${neighborHalfSpan.toFixed(2)}m)</span>
-                <b style="color:${dynamicGap < 0 ? 'red' : '#2ecc71'}">คงเหลือ: ${dynamicGap.toFixed(2)} ม. ${dynamicGap < 0 ? '❌ ชน' : '✅ พ้น'}</b>
-            </div>
-            <div class="audit-card" style="border-left-color: ${staticGap < rule.MinClearance ? 'red' : '#2ecc71'}">
-                <b>3. ระยะห่างขณะจอด (Static):</b>
-                <span class="formula">เกณฑ์มาตรฐาน Type ${ac.Code}: ${rule.MinClearance} เมตร</span>
-                <b>ระยะจริง: ${staticGap.toFixed(2)} เมตร ${staticGap < rule.MinClearance ? '❌ ต่ำกว่าเกณฑ์' : '✅ ผ่าน'}</b>
-            </div>
+            <b>2. ระยะห่างขณะเลี้ยว (Dynamic):</b>
+            <span class="formula">สูตร: ระยะห่าง Center - (R_Total + ครึ่งปีกข้างเคียง)</span>
+            <span class="formula">คำนวณ: ${minDist.toFixed(2)} - (${totalReach.toFixed(2)} + ${(otAc.Span/2).toFixed(2)})</span>
+            <b style="color:${dynamicGap < 0 ? 'red' : '#2ecc71'}">คงเหลือ: ${dynamicGap.toFixed(2)} เมตร</b><br><br>
+
+            <b>3. ระยะห่างปีกขณะจอด (Static):</b>
+            <span class="formula">เกณฑ์มาตรฐาน: ${rule.MinClearance} เมตร</span>
+            <b>ระยะจริง: ${staticGap.toFixed(2)} เมตร</b>
         `;
     } else {
-        auditHTML += `<div style="text-align:center; padding:20px; color:#aaa; border:1px dashed #666;">ไม่พบสิ่งกีดขวางในทิศทางเลี้ยว</div>`;
+        auditHTML += `<p style="text-align:center; padding:20px; color:#aaa; border:1px dashed #666;">ไม่พบเครื่องบินในทิศทางการเลี้ยว</p>`;
     }
-
     document.getElementById('audit-content').innerHTML = auditHTML;
 }
 
