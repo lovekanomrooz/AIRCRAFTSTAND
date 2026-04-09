@@ -239,7 +239,7 @@ function checkJetConflict(alloc, idx) {
         return dist < jetRange;
     });
 }
-   function draw() {
+ function draw() {
     const bg = document.getElementById('bg-layer');
     const sw = document.getElementById('swing-layer');
     const acL = document.getElementById('ac-layer');
@@ -248,13 +248,12 @@ function checkJetConflict(alloc, idx) {
     let curX = 50; xMap = {};
     const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
 
-    // 1. วาดหลุมจอด
+    // 1. วาดหลุมจอด (โค้ดเดิม)
     db.stands.forEach(st => {
         const w = st.Width * SCALE, l = st.Length * SCALE;
         let cx = (st.ParentID && xMap[st.ParentID]) ? xMap[st.ParentID] + (st.OffsetX * SCALE) : (curX + w/2);
         xMap[st.StandID] = cx;
         if (!st.ParentID) curX += w;
-
         bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y}" width="${w}" height="${l}" class="stand-box" />`;
         bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y + (12.5*SCALE)}" width="${w}" height="${l - (25*SCALE)}" class="no-go-line" />`;
         bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 12.5*SCALE}" r="6" class="t-mark" />`;
@@ -262,66 +261,114 @@ function checkJetConflict(alloc, idx) {
         bg.innerHTML += `<text x="${cx}" y="${HEADER_Y + l + 20}" fill="#888" text-anchor="middle" font-size="11" pointer-events="none">${st.StandID}</text>`;
     });
 
-    // 2. วาดเครื่องบินและองค์ประกอบความปลอดภัย
+    // 2. วาดเครื่องบินและ Dynamic Jet Blast
     allocations.forEach((alloc, idx) => {
         const ac = db.aircrafts.find(a => a.Model === alloc.model);
         const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE, r = (ac.SweepRadius + extraMargin) * SCALE;
         const mlgY = alloc.y + pDist;
+        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
 
-        // ตรวจสอบความปลอดภัยการเลี้ยว
-        const isDanger = checkCollision(alloc, idx, extraMargin);
-
-        // วาด Jet Blast (Hazard Zone)
+        // --- เพิ่มการวาด Dynamic Jet Blast ---
         const jetDist = (ac.JetBlast || 0) * SCALE;
         if (jetDist > 0) {
-            const isJetConflict = checkJetConflict(alloc, idx);
-            const fuselageW = (ac.Span / 8) * SCALE;
-            
-            const jetGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
-            jetGroup.setAttribute("transform", `translate(${alloc.x}, ${alloc.y}) rotate(${alloc.rotation})`);
-            
-            const jetPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            // วาดรูปทรงกรวยจากท้ายเครื่อง
-            jetPath.setAttribute("d", `M ${-fuselageW/2} ${ac.Length*SCALE} L ${fuselageW/2} ${ac.Length*SCALE} L ${fuselageW} ${ac.Length*SCALE + jetDist} L ${-fuselageW} ${ac.Length*SCALE + jetDist} Z`);
-            jetPath.setAttribute("class", `jetblast-zone ${isJetConflict ? 'jetblast-danger' : ''}`);
-            jetPath.setAttribute("style", `fill: ${isJetConflict ? 'rgba(255,0,0,0.3)' : 'rgba(255,165,0,0.2)'}; stroke: ${isJetConflict ? 'red' : 'orange'}; stroke-dasharray: 4; pointer-events: none;`);
-            
-            jetGroup.appendChild(jetPath);
-            sw.appendChild(jetGroup);
+            const isJetDanger = checkDynamicJetConflict(alloc, idx);
+            // วาดพื้นที่กวาดของแรงลม (180 องศาด้านหลัง)
+            drawJetBlastArc(sw, pivotX, mlgY, ac, alloc.turnMode === 0, isJetDanger, alloc.rotation);
         }
 
-        // วาดรัศมีการเลี้ยว 180 องศา (ด้านบน)
-        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
-        drawArc(sw, pivotX, mlgY, r, alloc.turnMode === 0, isDanger, alloc.rotation);
+        // วาดรัศมีเลี้ยวปีก (180 องศาด้านหน้า)
+        const isWingDanger = checkCollision(alloc, idx, extraMargin);
+        drawArc(sw, pivotX, mlgY, r, alloc.turnMode === 0, isWingDanger, alloc.rotation);
 
         // วาดตัวเครื่องบิน
         const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
         g.setAttribute("transform", `translate(${alloc.x}, ${alloc.y}) rotate(${alloc.rotation})`);
         g.setAttribute("class", `ac-group ${activeIdx === idx ? 'active-ac' : ''}`);
         g.innerHTML = `
-            <path d="M 0,${pDist} L ${-ac.Span*SCALE/2},${pDist+10} L ${ac.Span*SCALE/2},${pDist+10} Z" class="ac-wing" style="fill:#fff; stroke:#333;" />
-            <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" class="ac-body" style="fill:#fff; stroke:#333;" />
+            <path d="M 0,${pDist} L ${-ac.Span*SCALE/2},${pDist+10} L ${ac.Span*SCALE/2},${pDist+10} Z" style="fill:#fff; stroke:#333;" />
+            <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" fill="#fff" stroke="#333" />
             <circle cx="0" cy="0" r="4" fill="red" />
             <circle cx="${alloc.turnMode === 0 ? pOff : -pOff}" cy="${pDist}" class="pivot-dot" />
         `;
-        
-        g.onclick = (e) => { 
-            e.stopPropagation(); 
-            activeIdx = idx;
-            alloc.turnMode = 1 - alloc.turnMode; 
-            draw(); 
-        };
+        g.onclick = (e) => { e.stopPropagation(); activeIdx = idx; alloc.turnMode = 1 - alloc.turnMode; draw(); };
         g.ondblclick = (e) => { e.stopPropagation(); allocations.splice(idx, 1); activeIdx = null; draw(); };
         acL.appendChild(g);
 
-        // วาดระยะห่างปลายปีก
         drawSpecificGap(sw, alloc, idx);
     });
 
     if (activeIdx !== null && allocations[activeIdx]) updateAudit(allocations[activeIdx], activeIdx);
 }
 
+   // ฟังก์ชันวาดพื้นที่กวาดของแรงลม (Swept Jet Blast Zone)
+function drawJetBlastArc(layer, px, py, ac, isRightTurn, isDanger, rot) {
+    const jetRange = ac.JetBlast * SCALE;
+    const tailDist = ac.Length * SCALE - ac.NoseToPivot * SCALE; // ระยะจากล้อหลังถึงท้ายเครื่อง
+    const innerR = tailDist; 
+    const outerR = tailDist + jetRange;
     
+    const baseRad = (rot - 90) * Math.PI / 180;
+    // ทิศทางตรงข้ามหัวเครื่อง (ด้านท้าย)
+    const angleFrom = isRightTurn ? baseRad : baseRad - Math.PI;
+    const angleTo = isRightTurn ? baseRad + Math.PI : baseRad;
+
+    const createPath = (r) => {
+        const x1 = px + Math.cos(angleFrom) * r;
+        const y1 = py + Math.sin(angleFrom) * r;
+        const x2 = px + Math.cos(angleTo) * r;
+        const y2 = py + Math.sin(angleTo) * r;
+        return { x1, y1, x2, y2 };
+    };
+
+    const pInner = createPath(innerR);
+    const pOuter = createPath(outerR);
+    const sweep = isRightTurn ? 1 : 0;
+
+    // วาดรูปเสี้ยววงแหวน (Annulus Sector)
+    const d = `
+        M ${pInner.x1} ${pInner.y1} 
+        A ${innerR} ${innerR} 0 0 ${sweep} ${pInner.x2} ${pInner.y2}
+        L ${pOuter.x2} ${pOuter.y2}
+        A ${outerR} ${outerR} 0 0 ${1-sweep} ${pOuter.x1} ${pOuter.y1}
+        Z
+    `;
+
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", d);
+    p.setAttribute("style", `fill: ${isDanger ? 'rgba(255,0,0,0.2)' : 'rgba(255,165,0,0.1)'}; stroke: ${isDanger ? 'red' : 'orange'}; stroke-width: 1; stroke-dasharray: 4; pointer-events: none;`);
+    layer.appendChild(p);
+} 
+
+function checkDynamicJetConflict(alloc, idx) {
+    const ac = db.aircrafts.find(a => a.Model === alloc.model);
+    const jetRange = ac.JetBlast || 0;
+    const tailDist = ac.Length - ac.NoseToPivot; // ระยะล้อหลังถึงท้ายเครื่อง (เมตร)
+    
+    // รัศมีอันตรายคือตั้งแต่ท้ายเครื่องไปจนถึงระยะ Jet Blast
+    const minSafeR = tailDist;
+    const maxSafeR = tailDist + jetRange;
+
+    return allocations.some((other, otIdx) => {
+        if (idx === otIdx) return false;
+        
+        const acOther = db.aircrafts.find(o => o.Model === other.model);
+        const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE;
+        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
+        const mlgY = alloc.y + pDist;
+
+        // ระยะห่างจากจุดหมุนของเรา ไปยังจุดกึ่งกลางเครื่องลำข้างๆ
+        const distToNeighbor = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(mlgY - other.y, 2)) / SCALE;
+
+        // เงื่อนไข: ถ้าเครื่องข้างๆ อยู่ในรัศมีที่ Jet Blast กวาดผ่าน (ด้านหลัง 180 องศา)
+        // และระยะห่างอยู่ระหว่างตัวเครื่องไปจนถึงระยะลมเป่า
+        const isWithinRadius = distToNeighbor >= (minSafeR - acOther.Span/2) && distToNeighbor <= (maxSafeR + acOther.Span/2);
+        
+        // เช็คว่าอยู่ฝั่งเดียวกับที่จะเหวี่ยงท้ายไปหาหรือไม่
+        const isToward = (alloc.turnMode === 0 && other.x < alloc.x) || (alloc.turnMode === 1 && other.x > alloc.x);
+
+        return isWithinRadius && isToward;
+    });
+}
 
    function drawArc(layer, px, py, r, isRightTurn, isDanger, rot) {
     const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
@@ -484,17 +531,20 @@ function checkJetConflict(alloc, idx) {
 
     // 3. ตรวจสอบ Jet Blast
     if (ac.JetBlast) {
-        const isJetDanger = checkJetConflict(alloc, idx);
-        auditHTML += `
-            <div class="audit-card" style="border-left-color: ${isJetDanger ? 'red' : 'orange'}">
-                <b>3. การตรวจสอบ Jet Blast (แรงลม):</b><br>
-                <span class="formula">ระยะอันตราย (Breakaway): ${ac.JetBlast} เมตร</span>
-                <b style="color:${isJetDanger ? 'red' : '#2ecc71'}">
-                    สถานะ: ${isJetDanger ? '❌ อันตราย! ลมเป่าโดนเครื่องลำอื่น' : '✅ ระยะลมปลอดภัย'}
-                </b>
-            </div>
-        `;
-    }
+    const isJetDanger = checkDynamicJetConflict(alloc, idx);
+    const tailDist = ac.Length - ac.NoseToPivot;
+    
+    auditHTML += `
+        <div class="audit-card" style="border-left-color: ${isJetDanger ? 'red' : 'orange'}">
+            <b>4. ตรวจสอบ Dynamic Jet Blast:</b><br>
+            <span class="formula">ระยะกวาดลมท้ายเครื่อง: ${tailDist.toFixed(2)}ม. ถึง ${(tailDist + ac.JetBlast).toFixed(2)}ม.</span>
+            <b style="color:${isJetDanger ? 'red' : '#2ecc71'}">
+                สถานะ: ${isJetDanger ? '❌ อันตราย! ลมเป่าโดนเครื่องข้างเคียงขณะเลี้ยว' : '✅ ระยะลมกวาดปลอดภัย'}
+            </b>
+            ${isJetDanger ? '<br><small style="color:red">*ไม่แนะนำให้เลี้ยวออกจากหลุมนี้หากมีเครื่องจอดข้างๆ</small>' : ''}
+        </div>
+    `;
+}
 
     document.getElementById('audit-content').innerHTML = auditHTML;
 }
