@@ -38,12 +38,18 @@
         .pivot-dot { fill: #ff4757; r: 5; pointer-events: none; }
 
         /* Floating Audit Panel */
-        #audit-float { 
-            position: absolute; top: 130px; right: 20px; width: 400px; 
-            background: rgba(30, 30, 30, 0.95); padding: 20px; border-radius: 12px; 
-            border: 1px solid #444; box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
-            display: none; z-index: 500;
-        }
+        /* ปรับปรุง CSS ของ Audit Float */
+#audit-float { 
+    position: fixed; /* เปลี่ยนเป็น fixed เพื่อให้ไม่เลื่อนตามการ scroll ของลานจอด */
+    top: 130px; 
+    right: 20px; 
+    width: 450px; 
+    background: rgba(25, 25, 25, 0.95); 
+    border: 2px solid #444; 
+    border-radius: 10px; 
+    z-index: 2000;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+}
         .audit-card { line-height: 1.6; font-size: 0.95rem; }
         .formula { color: var(--accent); font-family: monospace; display: block; margin: 5px 0; }
         #ghost-group { pointer-events: none; display: none; opacity: 0.3; }
@@ -51,18 +57,24 @@
 </head>
 <body>
 
+<!-- ปรับปรุงส่วน Header -->
 <header id="top-bar">
     <div class="tool-box">
-        🎯 <b>Mode:</b> 
-        <select id="place-mode" style="background:#444; color:white; border:none; padding:2px;">
+        🎯 <b>โหมด:</b> 
+        <select id="place-mode" style="background:#444; color:white; border:none; padding:5px; border-radius:4px;">
             <option value="snap">Snap T-Mark</option>
             <option value="free">อิสระ (Parallel)</option>
         </select>
         <br>
-        🔄 <b>Rotation:</b> <input type="range" id="ac-rot" min="0" max="360" value="0" style="width:100px" oninput="updateRotPreview(this.value)"> <span id="deg-val">0</span>°
+        🔄 <b>Rotation:</b> 
+        <input type="number" id="ac-rot-num" value="0" style="width:50px; background:#444; color:var(--accent); border:1px solid #666;" oninput="syncRot(this.value, 'slider')">
+        <input type="range" id="ac-rot-slider" min="0" max="360" value="0" style="width:100px" oninput="syncRot(this.value, 'input')">
+    </div>
+    <div class="config-box">
+        <label>📏 Safety Margin เพิ่มเติม:</label><br>
+        <input type="number" id="extra-margin" style="width:70px; padding:5px; margin-top:5px; background:#444; color:var(--accent); border:1px solid #666;" value="0" oninput="draw()"> <b>เมตร</b>
     </div>
     <div class="ac-list-container" id="aircraft-list"></div>
-    <button id="cancel-btn" onclick="cancelSelection()" style="display:none; padding:10px; background:var(--danger); color:white; border:none; border-radius:6px; cursor:pointer;">ยกเลิก</button>
 </header>
 
 <div id="viewport">
@@ -78,10 +90,11 @@
     </svg>
 
     <!-- Floating Audit Panel -->
-    <div id="audit-float">
-        <div id="audit-content" class="audit-card"></div>
-        <button onclick="document.getElementById('audit-float').style.display='none'" style="width:100%; margin-top:10px; background:#444; color:white; border:none; padding:5px; cursor:pointer;">ปิด</button>
-    </div>
+    <div id="audit-float" style="cursor: move;">
+    <div id="audit-drag-handle" style="background:var(--accent); color:black; padding:5px; font-weight:bold; border-radius:8px 8px 0 0; text-align:center; font-size:12px;">📊 รายละเอียด (ลากเพื่อย้าย)</div>
+    <div id="audit-content" class="audit-card" style="padding:15px; max-height:70vh; overflow-y:auto;"></div>
+    <button onclick="document.getElementById('audit-float').style.display='none'" style="width:100%; background:#444; color:white; border:none; padding:8px; border-radius:0 0 8px 8px; cursor:pointer;">ปิดหน้าต่างนี้</button>
+</div>
 </div>
 
 <script>
@@ -90,7 +103,30 @@
     let allocations = []; 
     let selectedAC = null, activeIdx = null, currentRotation = 0, xMap = {};
     const SCALE = 4, HEADER_Y = 100;
+dragElement(document.getElementById("audit-float"));
 
+function dragElement(elmnt) {
+  var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+  if (document.getElementById("audit-drag-handle")) {
+    document.getElementById("audit-drag-handle").onmousedown = dragMouseDown;
+  }
+  function dragMouseDown(e) {
+    e.preventDefault();
+    pos3 = e.clientX; pos4 = e.clientY;
+    document.onmouseup = closeDragElement;
+    document.onmousemove = elementDrag;
+  }
+  function elementDrag(e) {
+    e.preventDefault();
+    pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
+    pos3 = e.clientX; pos4 = e.clientY;
+    elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
+    elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
+  }
+  function closeDragElement() {
+    document.onmouseup = null; document.onmousemove = null;
+  }
+}
     async function init() {
         try {
             const res = await fetch(API_URL);
@@ -236,51 +272,77 @@
         if (activeIdx !== null && allocations[activeIdx]) updateAudit(allocations[activeIdx], activeIdx);
     }
 
-    function drawArc(layer, px, py, r, isRight, isDanger, rot) {
-        const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
-        const baseAngle = (rot - 90) * Math.PI / 180;
-        const startX = px + Math.cos(baseAngle + (isRight ? Math.PI : 0)) * r;
-        const startY = py + Math.sin(baseAngle + (isRight ? Math.PI : 0)) * r;
-        const endX = px + Math.cos(baseAngle + (isRight ? 0 : Math.PI)) * r;
-        const endY = py + Math.sin(baseAngle + (isRight ? 0 : Math.PI)) * r;
+    // 1. ฟังก์ชัน Sync การหมุนระหว่าง Slider และ Input
+function syncRot(val, target) {
+    if (target === 'slider') document.getElementById('ac-rot-slider').value = val;
+    else document.getElementById('ac-rot-num').value = val;
+    updateRotPreview(val);
+}
 
-        const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${isRight ? 1 : 0} ${endX} ${endY}`;
-        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        p.setAttribute("d", d);
-        p.setAttribute("class", `swing-path ${isDanger?'unsafe':'safe'}`);
-        p.setAttribute("style", `marker-end: ${marker}`);
-        layer.appendChild(p);
-    }
+// 2. ปรับปรุงการวาด Arc ให้เป็น 180 องศาด้านบน (Nose side)
+function drawArc(layer, px, py, r, isRight, isDanger, rot) {
+    const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)' ;
+    const baseRad = (rot - 90) * Math.PI / 180;
+    
+    // คำนวณจุดเริ่มต้น (ปีกข้างนึง) และจุดจบ (ปีกอีกข้างนึง) โดยกวาดผ่านด้านหน้า
+    // ถ้าเลี้ยวขวา (Right): หมุนรอบ RH -> กวาดจากปีกซ้ายขึ้นไป
+    const startAngle = isRight ? baseRad + Math.PI : baseRad; 
+    const endAngle = isRight ? baseRad : baseRad - Math.PI;
 
-    function calculateAndDrawGaps(layer, alloc, idx) {
-        const myAc = db.aircrafts.find(a => a.Model === alloc.model);
-        const myStandIdx = db.stands.findIndex(s => s.StandID === alloc.standId);
+    const startX = px + Math.cos(startAngle) * r;
+    const startY = py + Math.sin(startAngle) * r;
+    const endX = px + Math.cos(endAngle) * r;
+    const endY = py + Math.sin(endAngle) * r;
 
-        allocations.forEach((other, otIdx) => {
-            if (idx === otIdx) return;
-            const otAc = db.aircrafts.find(a => a.Model === other.model);
-            const otStandIdx = db.stands.findIndex(s => s.StandID === other.standId);
+    const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${isRight ? 1 : 0} ${endX} ${endY}`;
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", d);
+    p.setAttribute("class", `swing-path ${isDanger?'unsafe':'safe'}`);
+    p.setAttribute("style", `marker-end: ${marker}; fill: none;`);
+    layer.appendChild(p);
+}
 
-            // กฎข้อ 3: วัดเฉพาะหลุมติดกัน
-            if (Math.abs(myStandIdx - otStandIdx) <= 2 && alloc.x < other.x) {
-                // กฎข้อ 1 & 2: ตรวจสอบการจอดขนาน
-                const isParallel = Math.abs(alloc.rotation - other.rotation) >= 45;
-                let p1, p2;
+   // 3. ปรับปรุงการคำนวณระยะห่างจุดที่ใกล้ที่สุด (Smart Gap)
+function calculateAndDrawGaps(layer, alloc, idx) {
+    const myAc = db.aircrafts.find(a => a.Model === alloc.model);
+    const myStand = db.stands.find(s => s.StandID === alloc.standId);
 
-                if (!isParallel) { // จอดทิศเดียวกัน: วัดปลายปีก
-                    p1 = { x: alloc.x + (myAc.Span*SCALE/2), y: alloc.y + (myAc.NoseToPivot*SCALE) };
-                    p2 = { x: other.x - (otAc.Span*SCALE/2), y: other.y + (otAc.NoseToPivot*SCALE) };
-                } else { // จอดขนาน: วัดปีกไปหัว/ท้าย
-                    p1 = { x: alloc.x + (myAc.Span*SCALE/2), y: alloc.y + (myAc.NoseToPivot*SCALE) };
-                    p2 = (Math.abs(p1.x - other.x) < Math.abs(p1.x - (other.x + otAc.Length*SCALE))) ? {x: other.x, y: other.y} : {x: other.x, y: other.y + otAc.Length*SCALE};
-                }
+    allocations.forEach((other, otIdx) => {
+        if (idx === otIdx) return;
+        const otAc = db.aircrafts.find(a => a.Model === other.model);
+        
+        // เช็คเฉพาะหลุมข้างเคียง
+        const distCenter = Math.abs(alloc.x - other.x) / SCALE;
+        if (distCenter > (myAc.Span + otAc.Span)) return;
 
-                const dist = Math.sqrt(Math.pow(p1.x-p2.x,2) + Math.pow(p1.y-p2.y,2)) / SCALE;
-                layer.innerHTML += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" class="gap-line" />`;
-                layer.innerHTML += `<text x="${(p1.x+p2.x)/2}" y="${(p1.y+p2.y)/2 - 10}" class="gap-text" text-anchor="middle">${dist.toFixed(2)}m</text>`;
-            }
+        // จุดพิจารณาของเครื่องข้างๆ (หัว, ท้าย, ปีกซ้าย, ปีกขวา)
+        const radOther = (other.rotation - 90) * Math.PI / 180;
+        const otherPoints = [
+            {x: other.x, y: other.y}, // หัว
+            {x: other.x - Math.cos(radOther)*(otAc.Length*SCALE), y: other.y - Math.sin(radOther)*(otAc.Length*SCALE)}, // ท้าย
+            {x: other.x + Math.cos(radOther + Math.PI/2)*(otAc.Span*SCALE/2), y: other.y + Math.sin(radOther + Math.PI/2)*(otAc.Span*SCALE/2)}, // ปีกซ้าย
+            {x: other.x - Math.cos(radOther + Math.PI/2)*(otAc.Span*SCALE/2), y: other.y - Math.sin(radOther + Math.PI/2)*(otAc.Span*SCALE/2)}  // ปีกขวา
+        ];
+
+        // จุดที่ใกล้ที่สุดจากปีกเราไปเครื่องข้างๆ
+        const myWingX = (other.x > alloc.x) ? alloc.x + (myAc.Span*SCALE/2) : alloc.x - (myAc.Span*SCALE/2);
+        const myWingY = alloc.y + (myAc.NoseToPivot * SCALE);
+        
+        let minDist = Infinity;
+        let targetPt = otherPoints[0];
+
+        otherPoints.forEach(pt => {
+            const d = Math.sqrt(Math.pow(myWingX - pt.x, 2) + Math.pow(myWingY - pt.y, 2));
+            if (d < minDist) { minDist = d; targetPt = pt; }
         });
-    }
+
+        const realGap = minDist / SCALE;
+        if (alloc.x < other.x) { // วาดเส้นบอกระยะห่าง
+            layer.innerHTML += `<line x1="${myWingX}" y1="${myWingY}" x2="${targetPt.x}" y2="${targetPt.y}" class="gap-line" />`;
+            layer.innerHTML += `<text x="${(myWingX+targetPt.x)/2}" y="${(myWingY+targetPt.y)/2 - 5}" class="gap-text" text-anchor="middle">${realGap.toFixed(2)}m</text>`;
+        }
+    });
+}
 
     function checkCollision(alloc, idx) {
         const ac = db.aircrafts.find(a => a.Model === alloc.model);
@@ -293,20 +355,52 @@
         });
     }
 
-    function updateAudit(alloc, idx) {
-        const ac = db.aircrafts.find(a => a.Model === alloc.model);
-        const float = document.getElementById('audit-float');
-        float.style.display = 'block';
-        
-        document.getElementById('audit-content').innerHTML = `
-            <h3>📍 รายละเอียด: ${alloc.standId}</h3>
-            <b>เครื่องบิน:</b> ${ac.Model} (Code ${ac.Code})<br>
-            <b>องศาจอด:</b> ${alloc.rotation}°<br>
-            <b>ทิศทางเลี้ยว:</b> ${alloc.turnMode === 0 ? 'Right Turn' : 'Left Turn'}<hr>
-            <span class="formula">รัศมีกวาด (R4): ${ac.SweepRadius}m</span>
-            <span class="formula">พิกัด Nose Gear: X=${alloc.x.toFixed(0)}, Y=${alloc.y.toFixed(0)}</span>
-        `;
+    // 4. ปรับปรุง Audit Panel ให้แสดงรายละเอียดตามที่ต้องการ
+function updateAudit(alloc, idx) {
+    const ac = db.aircrafts.find(a => a.Model === alloc.model);
+    const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
+    const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
+    
+    // รัศมีกวาดรวม (R_Total = PivotOffset + R4 + ExtraMargin)
+    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
+    
+    const float = document.getElementById('audit-float');
+    float.style.display = 'block';
+
+    // ค้นหา Net Clearance
+    let neighbor = null, minDist = Infinity;
+    allocations.forEach((other, otIdx) => {
+        if (idx === otIdx) return;
+        const d = Math.abs(alloc.x - other.x) / SCALE;
+        const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
+        if (isToward && d < minDist) { minDist = d; neighbor = other; }
+    });
+
+    let netClearanceText = "N/A";
+    if (neighbor) {
+        const otAc = db.aircrafts.find(a => a.Model === neighbor.model);
+        const gapVal = minDist - (totalReach + (otAc.Span/2));
+        netClearanceText = `${gapVal.toFixed(2)} ม. ${gapVal < 0 ? '❌ ชน' : '✅ พ้น'}`;
     }
+
+    document.getElementById('audit-content').innerHTML = `
+        <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:10px;">
+            <b style="font-size:1.2em; color:var(--accent);">📍 ${alloc.standId}</b><br>
+            <b>รุ่น:</b> ${ac.Model} (Type ${ac.Code})
+        </div>
+        <b>1. การคำนวณรัศมีการกวาด:</b>
+        <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
+        <b style="color:var(--accent);">รวม = ${totalReach.toFixed(2)} เมตร</b><br><br>
+        
+        <b>2. ระยะห่างขณะเลี้ยว (Net Clearance):</b>
+        <span class="formula">ระยะห่าง Center-to-Center: ${neighbor ? minDist.toFixed(2) : '-'} ม.</span>
+        <b style="font-size:1.1em;">เหลือจริง: ${netClearanceText}</b><br><br>
+
+        <b>3. ระยะห่างปีกขณะจอด (Static):</b>
+        <span class="formula">เกณฑ์มาตรฐาน Type ${ac.Code}: ห้ามต่ำกว่า ${rule.MinClearance} เมตร</span>
+        <span style="font-size:0.9em; color:#aaa;">*ใช้ตรวจสอบเทียบกับเส้นประสีฟ้าบนแผนผัง</span>
+    `;
+}
 
     function cancelSelection() {
         selectedAC = null;
