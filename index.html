@@ -2,55 +2,53 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>Aircraft Stand Planner Pro - Technical Auditor v5</title>
+    <title>Aircraft Stand Planner Pro - Technical Auditor v6</title>
     <style>
         :root { --safe: #2ecc71; --danger: #e74c3c; --accent: #f1c40f; --bg: #0f0f0f; --panel: #1a1a1a; }
         body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Sarabun', sans-serif; background: var(--bg); color: white; overflow: hidden; }
         
-        /* Top Navigation Bar */
-        #top-bar { height: 110px; background: var(--panel); border-bottom: 2px solid #333; padding: 10px 20px; display: flex; gap: 25px; align-items: center; z-index: 1000; }
+        /* Top Navigation */
+        #top-bar { height: 110px; background: var(--panel); border-bottom: 2px solid #333; padding: 10px 20px; display: flex; gap: 20px; align-items: center; z-index: 1000; }
         .ac-list-container { display: flex; gap: 12px; overflow-x: auto; flex-grow: 1; padding: 10px 0; }
-        .ac-item { min-width: 140px; background: #2c3e50; padding: 12px; border-radius: 8px; cursor: pointer; text-align: center; font-weight: bold; border: 2px solid transparent; transition: 0.2s; white-space: nowrap; }
-        .ac-item:hover { background: #3e5871; }
-        .ac-item.selected { background: var(--accent); color: #000; border-color: #fff; box-shadow: 0 0 15px rgba(241, 196, 15, 0.4); }
-        .config-box { min-width: 240px; background: #252525; padding: 12px; border-radius: 8px; border: 1px solid #444; }
+        .ac-item { min-width: 140px; background: #2c3e50; padding: 12px; border-radius: 8px; cursor: pointer; text-align: center; font-weight: bold; border: 2px solid transparent; transition: 0.2s; }
+        .ac-item.selected { background: var(--accent); color: #000; border-color: #fff; }
+        .config-box { min-width: 260px; background: #252525; padding: 12px; border-radius: 8px; border: 1px solid #444; }
 
-        /* Main Content */
+        /* Main Container */
         #main-container { display: flex; flex-grow: 1; overflow: hidden; }
         #viewport { flex-grow: 1; overflow: auto; background: #000; position: relative; }
         
-        /* Audit Panel กว้าง 550px */
-        #audit-panel { width: 550px; min-width: 550px; background: var(--panel); padding: 25px; overflow-y: auto; border-left: 2px solid #333; box-shadow: -10px 0 30px rgba(0,0,0,0.7); }
+        /* Audit Panel 550px */
+        #audit-panel { width: 550px; min-width: 550px; background: var(--panel); padding: 25px; overflow-y: auto; border-left: 2px solid #333; }
 
         svg { background: #111; min-width: 5000px; height: 100%; cursor: crosshair; }
 
-        /* SVG Components */
-        .stand-box { fill: rgba(255,255,255,0.01); stroke: #333; stroke-width: 1; pointer-events: none; }
-        .headerline { stroke: #555; stroke-width: 4; pointer-events: none; }
-        .t-mark { fill: var(--accent); opacity: 0.4; pointer-events: none; }
+        /* Layers Control */
+        #bg-layer { pointer-events: none; } /* พื้นหลัง/หลุม */
+        #swing-layer { pointer-events: none; } /* เส้นรัศมี/เส้นวัดระยะ (ทะลุผ่านได้) */
+        #ac-layer { pointer-events: all; } /* ตัวเครื่องบิน (คลิกได้) */
 
-        /* Swing Path - pointer-events: none เพื่อไม่ให้บังการคลิกเครื่องบิน */
-        .swing-path { fill: rgba(255, 255, 255, 0.02); stroke-width: 4; pointer-events: none; }
+        .stand-box { fill: rgba(255,255,255,0.01); stroke: #333; }
+        .headerline { stroke: #555; stroke-width: 4; }
+        .t-mark { fill: var(--accent); opacity: 0.4; pointer-events: auto; cursor: pointer; }
+
+        .swing-path { fill: rgba(255, 255, 255, 0.02); stroke-width: 4; }
         .safe { stroke: var(--safe); fill: rgba(46, 204, 113, 0.05); }
         .unsafe { stroke: var(--danger); fill: rgba(231, 76, 60, 0.15); }
         
-        /* Wingtip Clearance Line */
-        .wing-gap-line { stroke: #3498db; stroke-width: 2; stroke-dasharray: 5; pointer-events: none; }
-        .wing-gap-text { fill: #3498db; font-size: 14px; font-weight: bold; pointer-events: none; }
+        .wing-gap-line { stroke: #3498db; stroke-width: 2; stroke-dasharray: 5; }
+        .wing-gap-text { fill: #3498db; font-size: 15px; font-weight: bold; }
 
-        /* Aircraft Interaction Layer - pointer-events: all */
-        .ac-group { cursor: pointer; pointer-events: all; }
-        .ac-group:hover .ac-body { stroke: #fff; stroke-width: 2.5; }
+        .ac-group { cursor: pointer; }
         .ac-body { fill: #fff; stroke: #333; transition: 0.2s; }
+        .ac-group.active-ac .ac-body { stroke: var(--accent); stroke-width: 3; filter: drop-shadow(0 0 5px var(--accent)); }
         .ac-wing { fill: #bdc3c7; stroke: #333; }
-        .pivot-dot { fill: #ff4757; r: 6; pointer-events: none; }
+        .pivot-dot { fill: #ff4757; r: 6; }
 
-        /* Audit Card UI */
         .audit-card { background: #252a33; padding: 25px; border-radius: 15px; border-top: 10px solid var(--accent); line-height: 1.8; margin-bottom: 25px; }
         .formula { font-family: 'Courier New', monospace; color: var(--accent); display: block; background: rgba(0,0,0,0.4); padding: 12px; border-radius: 8px; margin: 12px 0; font-size: 1.1rem; border: 1px solid #444; }
         .res-box { font-size: 1.6rem; font-weight: bold; text-align: center; padding: 20px; border-radius: 10px; margin-top: 20px; border: 2px dashed; }
         
-        #status-indicator { position: absolute; bottom: 15px; left: 15px; background: rgba(0,0,0,0.8); padding: 6px 15px; border-radius: 20px; font-size: 13px; color: #safe; border: 1px solid #333; }
         #ghost-group { pointer-events: none; display: none; opacity: 0.3; }
     </style>
 </head>
@@ -58,11 +56,11 @@
 
 <header id="top-bar">
     <div class="config-box">
-        <label>🛠️ ตั้งค่า Safety Margin:</label><br>
-        <input type="number" id="extra-margin" style="width:80px; padding:8px; margin-top:6px; border-radius:6px; font-size: 1.1rem; font-weight: bold;" value="0" oninput="draw()"> <b>เมตร</b>
+        <label>🛠️ เพิ่มระยะปลอดภัย (Margin):</label><br>
+        <input type="number" id="extra-margin" style="width:100px; padding:8px; margin-top:6px; border-radius:6px; font-size: 1.2rem;" value="0" oninput="draw()"> <b>เมตร</b>
     </div>
     <div class="ac-list-container" id="aircraft-list">ดึงข้อมูลเครื่องบิน...</div>
-    <button id="cancel-btn" onclick="cancelSelection()" style="display:none; padding:12px 24px; background:var(--danger); border:none; color:white; border-radius:10px; cursor:pointer; font-weight:bold;">ยกเลิกเลือก</button>
+    <button id="cancel-btn" onclick="cancelSelection()" style="display:none; padding:12px 24px; background:var(--danger); border:none; color:white; border-radius:10px; cursor:pointer;">ยกเลิก</button>
 </header>
 
 <div id="main-container">
@@ -72,18 +70,20 @@
                 <marker id="arrow-safe" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2ecc71"/></marker>
                 <marker id="arrow-danger" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#e74c3c"/></marker>
             </defs>
-            <g id="main-layer"></g>
+            <!-- แยก Layer ชัดเจน -->
+            <g id="bg-layer"></g>
+            <g id="swing-layer"></g>
+            <g id="ac-layer"></g>
             <g id="ghost-group">
                 <path id="ghost-wing" d="" fill="#ced6e0" />
                 <rect id="ghost-body" rx="8" fill="#fff" />
             </g>
         </svg>
-        <div id="status-indicator">🛰️ ฐานข้อมูลออนไลน์ (Scale 1:25)</div>
     </div>
 
     <div id="audit-panel">
-        <h2 style="color: var(--accent); margin-top: 0; font-size: 1.8rem;">📊 สรุปผลการตรวจสอบ</h2>
-        <div id="audit-content">กรุณาเลือกอากาศยานบนลานจอด เพื่อดูการวิเคราะห์ระยะปลอดภัยทางเทคนิค...</div>
+        <h2 style="color: var(--accent); margin-top: 0;">📊 รายละเอียดการคำนวณ</h2>
+        <div id="audit-content">คลิกที่เครื่องบินเพื่อตรวจสอบ...</div>
     </div>
 </div>
 
@@ -92,8 +92,7 @@
 
     let db = { aircrafts: [], stands: [], clearanceRules: [] };
     let allocations = []; 
-    let selectedAC = null;
-    let xMap = {}; 
+    let selectedAC = null, activeIdx = null, xMap = {}; 
     const SCALE = 4;
     const HEADER_Y = 100;
 
@@ -103,7 +102,7 @@
             db = await res.json();
             renderList();
             draw();
-        } catch (e) { document.getElementById('status-indicator').innerHTML = "🔴 เชื่อมต่อฐานข้อมูลล้มเหลว"; }
+        } catch (e) { alert("Error connecting to GS"); }
     }
 
     function renderList() {
@@ -149,85 +148,83 @@
     function handleSvgClick(e) {
         if (!selectedAC) return;
         const pt = getSvgPt(e);
-        let bestStandId = null, snapX = null, snapY = null;
-
-        // ค้นหาหลุมจอด (ลำดับหลุมย่อยก่อน)
+        let bestStandId = null, snapX, snapY;
         const sortedStands = [...db.stands].sort((a, b) => (b.ParentID ? 1 : 0) - (a.ParentID ? 1 : 0));
 
         for (let st of sortedStands) {
-            const cx = xMap[st.StandID];
-            const hw = (st.Width * SCALE) / 2;
+            const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
             if (pt.x >= cx - hw && pt.x <= cx + hw) {
                 bestStandId = st.StandID;
                 const t1 = HEADER_Y + (12.5 * SCALE), t2 = HEADER_Y + (30.0 * SCALE);
-                if (Math.abs(pt.y - t1) < 40) { snapY = t1; snapX = cx; }
-                else if (Math.abs(pt.y - t2) < 40) { snapY = t2; snapX = cx; }
-                if (snapY) break; 
+                snapY = Math.abs(pt.y - t1) < 40 ? t1 : (Math.abs(pt.y - t2) < 40 ? t2 : null);
+                snapX = cx;
+                if (snapY) break;
             }
         }
 
         if (bestStandId && snapY) {
             allocations.push({ standId: bestStandId, model: selectedAC.Model, x: snapX, y: snapY, turnMode: 0 });
+            activeIdx = allocations.length - 1;
             cancelSelection();
             draw();
         }
     }
 
     function draw() {
-        const layer = document.getElementById('main-layer');
-        layer.innerHTML = '';
+        const bg = document.getElementById('bg-layer');
+        const sw = document.getElementById('swing-layer');
+        const acL = document.getElementById('ac-layer');
+        bg.innerHTML = ''; sw.innerHTML = ''; acL.innerHTML = '';
+
         const margin = parseFloat(document.getElementById('extra-margin').value) || 0;
-        let curX = 50;
-        xMap = {};
+        let curX = 50; xMap = {};
 
         // 1. วาดหลุมจอด
         db.stands.forEach(st => {
-            const sw = st.Width * SCALE, sl = st.Length * SCALE;
-            let cx = (st.ParentID && xMap[st.ParentID]) ? xMap[st.ParentID] + (st.OffsetX * SCALE) : (curX + sw/2);
+            const width = st.Width * SCALE, length = st.Length * SCALE;
+            let cx = (st.ParentID && xMap[st.ParentID]) ? xMap[st.ParentID] + (st.OffsetX * SCALE) : (curX + width/2);
             xMap[st.StandID] = cx;
-            if (!st.ParentID) curX += sw;
+            if (!st.ParentID) curX += width;
 
-            layer.innerHTML += `<rect x="${cx - sw/2}" y="${HEADER_Y}" width="${sw}" height="${sl}" class="stand-box" />`;
-            layer.innerHTML += `<line x1="${cx - sw/2}" y1="${HEADER_Y}" x2="${cx + sw/2}" y2="${HEADER_Y}" class="headerline" />`;
-            layer.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 12.5*SCALE}" r="6" class="t-mark" />`;
-            layer.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 30.0*SCALE}" r="6" class="t-mark" />`;
-            layer.innerHTML += `<text x="${cx}" y="${HEADER_Y + sl + 20}" fill="#888" text-anchor="middle" font-size="11" pointer-events="none">${st.StandID}</text>`;
+            bg.innerHTML += `<rect x="${cx - width/2}" y="${HEADER_Y}" width="${width}" height="${length}" class="stand-box" />`;
+            bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 12.5*SCALE}" r="6" class="t-mark" />`;
+            bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 30.0*SCALE}" r="6" class="t-mark" />`;
+            bg.innerHTML += `<text x="${cx}" y="${HEADER_Y + length + 20}" fill="#888" text-anchor="middle" font-size="11">${st.StandID}</text>`;
         });
 
-        // 2. วาดเครื่องบิน
+        // 2. วาดส่วนประกอบเครื่องบิน
         allocations.forEach((alloc, idx) => {
             const ac = db.aircrafts.find(a => a.Model === alloc.model);
-            const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE;
-            const r = (ac.SweepRadius + margin) * SCALE;
+            const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE, r = (ac.SweepRadius + margin) * SCALE;
             const mlgY = alloc.y + pDist;
 
             const isDanger = checkSafety(alloc, idx, margin);
 
-            // Swing Path (Mode 0: Right turn / RH Pivot | Mode 1: Left turn / LH Pivot)
-            if (alloc.turnMode === 0) draw180Arc(layer, alloc.x + pOff, mlgY, r, true, isDanger); 
-            else draw180Arc(layer, alloc.x - pOff, mlgY, r, false, isDanger);
+            // วาดรัศมีลง Swing Layer (คลิกทะลุได้)
+            if (alloc.turnMode === 0) draw180Arc(sw, alloc.x + pOff, mlgY, r, true, isDanger); 
+            else draw180Arc(sw, alloc.x - pOff, mlgY, r, false, isDanger);
 
+            // วาดตัวเครื่องลง AC Layer (คลิกได้)
             const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
             g.setAttribute("transform", `translate(${alloc.x}, ${alloc.y})`);
-            g.setAttribute("class", "ac-group");
+            g.setAttribute("class", `ac-group ${activeIdx === idx ? 'active-ac' : ''}`);
             g.innerHTML = `
                 <path d="M 0,${pDist} L ${-ac.Span*SCALE/2},${pDist+10} L ${ac.Span*SCALE/2},${pDist+10} Z" class="ac-wing" />
                 <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" class="ac-body" />
                 <circle cx="0" cy="0" r="4" fill="red" />
                 <circle cx="${alloc.turnMode === 0 ? pOff : -pOff}" cy="${pDist}" class="pivot-dot" />
             `;
-            // คลิกเครื่องบิน: สลับเลี้ยว + อัปเดต Audit
             g.onclick = (e) => { 
                 e.stopPropagation(); 
+                activeIdx = idx;
                 alloc.turnMode = 1 - alloc.turnMode; 
                 draw(); 
-                updateAudit(alloc, idx, margin); 
             };
-            // ดับเบิลคลิก: ลบออก
-            g.ondblclick = (e) => { e.stopPropagation(); allocations.splice(idx, 1); draw(); document.getElementById('audit-content').innerHTML = 'ลบข้อมูลแล้ว...'; };
-            layer.appendChild(g);
+            g.ondblclick = (e) => { e.stopPropagation(); allocations.splice(idx, 1); activeIdx = null; draw(); };
+            acL.appendChild(g);
 
-            drawWingClearance(layer, alloc);
+            drawGapLines(sw, alloc);
+            if (activeIdx === idx) updateAudit(alloc, idx, margin);
         });
     }
 
@@ -250,31 +247,30 @@
             if (myIdx === otIdx) return false;
             const oAc = db.aircrafts.find(a => a.Model === other.model);
             const dist = Math.abs(alloc.x - other.x) / SCALE;
-            const isCorrectSide = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
-            return isCorrectSide && (reach + oAc.Span/2 > dist);
+            const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
+            return isToward && (reach + oAc.Span/2 > dist);
         });
     }
 
-    function drawWingClearance(layer, alloc) {
+    function drawGapLines(layer, alloc) {
         const ac = db.aircrafts.find(a => a.Model === alloc.model);
-        const myRightWing = alloc.x + (ac.Span * SCALE / 2);
-        
+        const myRight = alloc.x + (ac.Span * SCALE / 2);
         allocations.forEach(other => {
             if (other.x > alloc.x && (other.x - alloc.x) < 500) {
                 const oAc = db.aircrafts.find(a => a.Model === other.model);
-                const otherLeftWing = other.x - (oAc.Span * SCALE / 2);
-                const gap = (otherLeftWing - myRightWing) / SCALE;
-                const yPos = alloc.y + 100;
-                layer.innerHTML += `<line x1="${myRightWing}" y1="${yPos}" x2="${otherLeftWing}" y2="${yPos}" class="wing-gap-line" />`;
-                layer.innerHTML += `<text x="${(myRightWing + otherLeftWing)/2}" y="${yPos-10}" class="wing-gap-text" text-anchor="middle">${gap.toFixed(2)}m</text>`;
+                const otherLeft = other.x - (oAc.Span * SCALE / 2);
+                const gap = (otherLeft - myRight) / SCALE;
+                const y = alloc.y + 100;
+                layer.innerHTML += `<line x1="${myRight}" y1="${y}" x2="${otherLeft}" y2="${y}" class="wing-gap-line" />`;
+                layer.innerHTML += `<text x="${(myRight+otherLeft)/2}" y="${y-10}" class="wing-gap-text" text-anchor="middle">${gap.toFixed(2)}m</text>`;
             }
         });
     }
 
     function updateAudit(alloc, idx, margin) {
         const ac = db.aircrafts.find(a => a.Model === alloc.model);
-        const totalReach = ac.PivotOffset + ac.SweepRadius + margin;
         const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
+        const totalReach = ac.PivotOffset + ac.SweepRadius + margin;
         
         let neighbor = null, minDist = Infinity;
         allocations.forEach((other, otIdx) => {
@@ -285,9 +281,8 @@
         });
 
         let content = `<div class="audit-card">`;
-        content += `<div class="audit-header"><b>📍 หลุมจอด: ${alloc.standId}</b> <span class="direction-tag">${alloc.turnMode === 0 ? 'เลี้ยวขวา ➡️' : '⬅️ เลี้ยวซ้าย'}</span></div>`;
-        content += `อากาศยาน: <b>${ac.Model}</b> (Code: ${ac.Code})<br>`;
-        content += `ระยะกวาดจริง (R4): ${ac.SweepRadius}m | Extra Margin: +${margin}m<hr>`;
+        content += `<div class="audit-header"><b>📍 หลุม: ${alloc.standId}</b> <span class="direction-tag">${alloc.turnMode === 0 ? 'เลี้ยวขวา ➡️' : '⬅️ เลี้ยวซ้าย'}</span></div>`;
+        content += `รุ่น: <b>${ac.Model}</b> (Code: ${ac.Code})<hr>`;
         
         if (neighbor) {
             const oAc = db.aircrafts.find(a => a.Model === neighbor.model);
@@ -295,13 +290,13 @@
             const dynamicGap = minDist - (totalReach + oAc.Span/2);
             const isDanger = dynamicGap < 0 || staticGap < rule.MinClearance;
 
-            content += `อากาศยานข้างเคียง: <b>${neighbor.model}</b> (หลุม ${neighbor.standId})<br>`;
-            content += `<span class="formula">1. ระยะห่างขณะจอด (Static): ${staticGap.toFixed(2)}m (Min Req: ${rule.MinClearance}m)</span>`;
-            content += `<span class="formula">2. ระยะห่างขณะเลี้ยว (Dynamic): ${dynamicGap.toFixed(2)}m</span>`;
-            content += `<div class="res-box" style="background:${isDanger ? 'rgba(231,76,60,0.2)' : 'rgba(46,204,113,0.2)'}; border-color:${isDanger ? 'var(--danger)' : 'var(--safe)'}; color:${isDanger ? 'var(--danger)' : 'var(--safe)'}">`;
+            content += `อากาศยานข้างเคียง: <b>${neighbor.model}</b><br>`;
+            content += `<span class="formula">Static Gap: ${staticGap.toFixed(2)}m (ICAO Min: ${rule.MinClearance}m)</span>`;
+            content += `<span class="formula">Dynamic Gap: ${dynamicGap.toFixed(2)}m (ขณะเลี้ยว)</span>`;
+            content += `<div class="res-box" style="border-color:${isDanger ? 'var(--danger)' : 'var(--safe)'}; color:${isDanger ? 'var(--danger)' : 'var(--safe)'}">`;
             content += `${isDanger ? '❌ ไม่ผ่านมาตรฐาน' : '✅ ปลอดภัย'}</div>`;
         } else {
-            content += `<p style="text-align:center; color:#888; padding: 20px;">ไม่พบอากาศยานจอดอยู่ในทิศทางที่เลี้ยวไป</p>`;
+            content += `<p style="text-align:center; color:#888;">ไม่พบอากาศยานในทิศทางที่เลี้ยว</p>`;
         }
         content += `</div>`;
         document.getElementById('audit-content').innerHTML = content;
