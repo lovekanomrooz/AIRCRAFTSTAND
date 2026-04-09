@@ -302,49 +302,55 @@ function checkJetConflict(alloc, idx) {
 
    // ฟังก์ชันวาดพื้นที่กวาดของแรงลม (Swept Jet Blast Zone)
 function drawJetBlastArc(layer, px, py, ac, isRightTurn, isDanger, rot) {
-    const jetRange = ac.JetBlast * SCALE;
-    const tailDist = ac.Length * SCALE - ac.NoseToPivot * SCALE; // ระยะจากล้อหลังถึงท้ายเครื่อง
+    const jetRange = (ac.JetBlast || 0) * SCALE;
+    const tailDist = (ac.Length - ac.NoseToPivot) * SCALE; // ระยะล้อหลังถึงท้ายเครื่อง
     const innerR = tailDist; 
     const outerR = tailDist + jetRange;
     
+    // baseRad คือทิศทางจมูกเครื่องบิน
     const baseRad = (rot - 90) * Math.PI / 180;
-    // ทิศทางตรงข้ามหัวเครื่อง (ด้านท้าย)
-    const angleFrom = isRightTurn ? baseRad : baseRad - Math.PI;
-    const angleTo = isRightTurn ? baseRad + Math.PI : baseRad;
+    
+    // จุดเริ่มของ Jet Blast คือด้านหลังเครื่องเสมอ (baseRad + 180 องศา)
+    const backAngle = baseRad + Math.PI;
 
-    const createPath = (r) => {
-        const x1 = px + Math.cos(angleFrom) * r;
-        const y1 = py + Math.sin(angleFrom) * r;
-        const x2 = px + Math.cos(angleTo) * r;
-        const y2 = py + Math.sin(angleTo) * r;
-        return { x1, y1, x2, y2 };
-    };
+    // ถ้าเลี้ยวขวา (Right Turn): ท้ายจะเหวี่ยงไป "ซ้าย" (ทวนเข็ม)
+    // ถ้าเลี้ยวซ้าย (Left Turn): ท้ายจะเหวี่ยงไป "ขวา" (ตามเข็ม)
+    // ดังนั้น endAngle ของท้ายจะสวนทางกับปีก
+    const endAngle = isRightTurn ? backAngle - Math.PI / 2 : backAngle + Math.PI / 2;
+    
+    // sweepFlag: เลี้ยวขวา(ท้ายไปซ้าย)ใช้ 0, เลี้ยวซ้าย(ท้ายไปขวา)ใช้ 1
+    const sweep = isRightTurn ? 0 : 1;
 
-    const pInner = createPath(innerR);
-    const pOuter = createPath(outerR);
-    const sweep = isRightTurn ? 1 : 0;
+    const getPt = (r, angle) => ({
+        x: px + Math.cos(angle) * r,
+        y: py + Math.sin(angle) * r
+    });
 
-    // วาดรูปเสี้ยววงแหวน (Annulus Sector)
+    const p1i = getPt(innerR, backAngle);
+    const p2i = getPt(innerR, endAngle);
+    const p1o = getPt(outerR, backAngle);
+    const p2o = getPt(outerR, endAngle);
+
+    // วาดรูปเสี้ยววงแหวนของแรงลม
     const d = `
-        M ${pInner.x1} ${pInner.y1} 
-        A ${innerR} ${innerR} 0 0 ${sweep} ${pInner.x2} ${pInner.y2}
-        L ${pOuter.x2} ${pOuter.y2}
-        A ${outerR} ${outerR} 0 0 ${1-sweep} ${pOuter.x1} ${pOuter.y1}
+        M ${p1i.x} ${p1i.y} 
+        A ${innerR} ${innerR} 0 0 ${sweep} ${p2i.x} ${p2i.y}
+        L ${p2o.x} ${p2o.y}
+        A ${outerR} ${outerR} 0 0 ${1-sweep} ${p1o.x} ${p1o.y}
         Z
     `;
 
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
-    p.setAttribute("style", `fill: ${isDanger ? 'rgba(255,0,0,0.2)' : 'rgba(255,165,0,0.1)'}; stroke: ${isDanger ? 'red' : 'orange'}; stroke-width: 1; stroke-dasharray: 4; pointer-events: none;`);
+    p.setAttribute("style", `fill: ${isDanger ? 'rgba(255,0,0,0.3)' : 'rgba(255,165,0,0.15)'}; stroke: ${isDanger ? 'red' : 'orange'}; stroke-width: 1; stroke-dasharray: 4; pointer-events: none;`);
     layer.appendChild(p);
-} 
+}
 
 function checkDynamicJetConflict(alloc, idx) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
     const jetRange = ac.JetBlast || 0;
-    const tailDist = ac.Length - ac.NoseToPivot; // ระยะล้อหลังถึงท้ายเครื่อง (เมตร)
+    const tailDist = ac.Length - ac.NoseToPivot;
     
-    // รัศมีอันตรายคือตั้งแต่ท้ายเครื่องไปจนถึงระยะ Jet Blast
     const minSafeR = tailDist;
     const maxSafeR = tailDist + jetRange;
 
@@ -356,17 +362,17 @@ function checkDynamicJetConflict(alloc, idx) {
         const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
         const mlgY = alloc.y + pDist;
 
-        // ระยะห่างจากจุดหมุนของเรา ไปยังจุดกึ่งกลางเครื่องลำข้างๆ
         const distToNeighbor = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(mlgY - other.y, 2)) / SCALE;
 
-        // เงื่อนไข: ถ้าเครื่องข้างๆ อยู่ในรัศมีที่ Jet Blast กวาดผ่าน (ด้านหลัง 180 องศา)
-        // และระยะห่างอยู่ระหว่างตัวเครื่องไปจนถึงระยะลมเป่า
+        // ตรวจสอบระยะรัศมี
         const isWithinRadius = distToNeighbor >= (minSafeR - acOther.Span/2) && distToNeighbor <= (maxSafeR + acOther.Span/2);
         
-        // เช็คว่าอยู่ฝั่งเดียวกับที่จะเหวี่ยงท้ายไปหาหรือไม่
-        const isToward = (alloc.turnMode === 0 && other.x < alloc.x) || (alloc.turnMode === 1 && other.x > alloc.x);
+        // --- ปรับปรุง Logic การเช็คฝั่ง ---
+        // ถ้าเลี้ยวขวา (turnMode 0) ท้ายเหวี่ยงไปซ้าย -> ต้องเช็คเครื่องที่อยู่ฝั่งซ้าย (other.x < alloc.x)
+        // ถ้าเลี้ยวซ้าย (turnMode 1) ท้ายเหวี่ยงไปขวา -> ต้องเช็คเครื่องที่อยู่ฝั่งขวา (other.x > alloc.x)
+        const isCorrectSide = (alloc.turnMode === 0 && other.x < alloc.x) || (alloc.turnMode === 1 && other.x > alloc.x);
 
-        return isWithinRadius && isToward;
+        return isWithinRadius && isCorrectSide;
     });
 }
 
@@ -530,18 +536,18 @@ function checkDynamicJetConflict(alloc, idx) {
     </div>`;
 
     // 3. ตรวจสอบ Jet Blast
-    if (ac.JetBlast) {
+   if (ac.JetBlast) {
     const isJetDanger = checkDynamicJetConflict(alloc, idx);
-    const tailDist = ac.Length - ac.NoseToPivot;
+    const tailSwingSide = alloc.turnMode === 0 ? "ซ้าย ⬅️" : "ขวา ➡️";
     
     auditHTML += `
         <div class="audit-card" style="border-left-color: ${isJetDanger ? 'red' : 'orange'}">
-            <b>4. ตรวจสอบ Dynamic Jet Blast:</b><br>
-            <span class="formula">ระยะกวาดลมท้ายเครื่อง: ${tailDist.toFixed(2)}ม. ถึง ${(tailDist + ac.JetBlast).toFixed(2)}ม.</span>
+            <b>3. ตรวจสอบ Jet Blast ขณะเลี้ยว:</b><br>
+            ทิศทางเหวี่ยงท้ายเครื่อง: <b style="color:var(--accent);">${tailSwingSide}</b><br>
+            <span class="formula">ระยะอันตรายจากจุดหมุน: ${tailDist.toFixed(2)}ม. - ${(tailDist + ac.JetBlast).toFixed(2)}ม.</span>
             <b style="color:${isJetDanger ? 'red' : '#2ecc71'}">
-                สถานะ: ${isJetDanger ? '❌ อันตราย! ลมเป่าโดนเครื่องข้างเคียงขณะเลี้ยว' : '✅ ระยะลมกวาดปลอดภัย'}
+                สถานะ: ${isJetDanger ? '❌ อันตราย! ลมเป่าโดนเครื่องฝั่ง' + tailSwingSide : '✅ ระยะลมกวาดปลอดภัย'}
             </b>
-            ${isJetDanger ? '<br><small style="color:red">*ไม่แนะนำให้เลี้ยวออกจากหลุมนี้หากมีเครื่องจอดข้างๆ</small>' : ''}
         </div>
     `;
 }
