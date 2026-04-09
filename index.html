@@ -234,9 +234,12 @@
 
             const isDanger = checkCollision(alloc, idx, extraMargin);
 
-            // Pivot Logic
-            const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
-            drawArc(sw, pivotX, mlgY, r, alloc.turnMode === 0, isDanger, alloc.rotation);
+            // ตรวจสอบความถูกต้อง: 
+    // เลี้ยวขวา (turnMode 0) ต้องหมุนรอบล้อขวา (x + pOff)
+    // เลี้ยวซ้าย (turnMode 1) ต้องหมุนรอบล้อซ้าย (x - pOff)
+    const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
+    
+    drawArc(sw, pivotX, mlgY, r, alloc.turnMode === 0, isDanger, alloc.rotation);
 
             const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
             g.setAttribute("transform", `translate(${alloc.x}, ${alloc.y}) rotate(${alloc.rotation})`);
@@ -262,20 +265,51 @@
         if (activeIdx !== null && allocations[activeIdx]) updateAudit(allocations[activeIdx], activeIdx);
     }
 
-    function drawArc(layer, px, py, r, isRightTurn, isDanger, rot) {
-        const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
-        const baseRad = (rot - 90) * Math.PI / 180;
-        const angleFrom = isRightTurn ? baseRad + Math.PI : baseRad; 
-        const angleTo = isRightTurn ? baseRad : baseRad - Math.PI;
-        const startX = px + Math.cos(angleFrom) * r, startY = py + Math.sin(angleFrom) * r;
-        const endX = px + Math.cos(angleTo) * r, endY = py + Math.sin(angleTo) * r;
-        const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${isRightTurn ? 1 : 0} ${endX} ${endY}`;
-        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        p.setAttribute("d", d);
-        p.setAttribute("class", `swing-path ${isDanger?'unsafe':'safe'}`);
-        p.setAttribute("style", `marker-end: ${marker}; fill: none;`);
-        layer.appendChild(p);
+   function drawArc(layer, px, py, r, isRightTurn, isDanger, rot) {
+    const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
+    
+    // 1. หาความชันของหัวเครื่องบิน (Base Angle)
+    // rot 0 คือหัวชี้ขึ้นบน (-90 องศาในระบบ SVG)
+    const baseRad = (rot - 90) * Math.PI / 180;
+
+    // 2. กำหนดมุมระนาบปีก (ซ้ายและขวา) ที่ตั้งฉากกับหัวเครื่อง
+    const leftWingAngle = baseRad - Math.PI / 2;
+    const rightWingAngle = baseRad + Math.PI / 2;
+
+    let startAngle, endAngle, sweepFlag;
+
+    if (isRightTurn) {
+        // --- เลี้ยวขวา (หมุนรอบล้อขวา RH) ---
+        // จุดเริ่ม: ปลายปีกซ้าย (Outer Wing)
+        // ทิศทาง: กวาดตามเข็มนาฬิกา (Sweep Flag 1) ผ่านหัวเครื่องไปจบที่ระนาบปีกขวา
+        startAngle = leftWingAngle;
+        endAngle = rightWingAngle;
+        sweepFlag = 1;
+    } else {
+        // --- เลี้ยวซ้าย (หมุนรอบล้อซ้าย LH) ---
+        // จุดเริ่ม: ปลายปีกขวา (Outer Wing)
+        // ทิศทาง: กวาดทวนเข็มนาฬิกา (Sweep Flag 0) ผ่านหัวเครื่องไปจบที่ระนาบปีกซ้าย
+        startAngle = rightWingAngle;
+        endAngle = leftWingAngle;
+        sweepFlag = 0;
     }
+
+    // 3. คำนวณพิกัดจุดเริ่มและจุดจบจริง
+    const startX = px + Math.cos(startAngle) * r;
+    const startY = py + Math.sin(startAngle) * r;
+    const endX = px + Math.cos(endAngle) * r;
+    const endY = py + Math.sin(endAngle) * r;
+
+    // 4. วาดเส้น Arc 180 องศา
+    // large-arc-flag = 0 เพราะเป็นครึ่งวงกลมพอดี
+    const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${sweepFlag} ${endX} ${endY}`;
+    
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", d);
+    p.setAttribute("class", `swing-path ${isDanger ? 'unsafe' : 'safe'}`);
+    p.setAttribute("style", `marker-end: ${marker}; fill: none; stroke-width: 3.5px;`);
+    layer.appendChild(p);
+}
 
     function drawSpecificGap(layer, alloc, idx) {
         const myAc = db.aircrafts.find(a => a.Model === alloc.model);
