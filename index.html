@@ -327,13 +327,19 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
     const tailDist = (ac.Length - ac.NoseToPivot) * SCALE; 
     const innerR = tailDist; 
     const outerR = tailDist + jetRange;
+    
+    // ทิศทางของจมูกเครื่องบิน (Radian)
     const baseRad = (rot - 90) * Math.PI / 180;
+    // ทิศทางตรงข้าม (ท้ายเครื่อง)
     const backAngle = baseRad + Math.PI;
 
-    // LOGIC FIX: ถ้าจมูกเลี้ยวขวา (isNoseRight=true) ท้ายเหวี่ยงซ้าย (sweep 0) 
-    //            ถ้าจมูกเลี้ยวซ้าย (isNoseRight=false) ท้ายเหวี่ยงขวา (sweep 1)
+    // --- LOGIC สลับฝั่ง Visual ---
+    // หัวเลี้ยวขวา (isNoseRight=true)  -> ท้ายเหวี่ยงไป "ซ้าย" (ทวนเข็มนาฬิกา / Sweep 0)
+    // หัวเลี้ยวซ้าย (isNoseRight=false) -> ท้ายเหวี่ยงไป "ขวา" (ตามเข็มนาฬิกา / Sweep 1)
     const sweepFlag = isNoseRight ? 0 : 1; 
-    const angleDiff = Math.PI; // วาด 180 องศาให้เต็มวงตามปีก
+    
+    // กวาดไป 90 องศา (หรือ Math.PI / 2) เพื่อให้เห็นพื้นที่อันตรายช่วงเริ่มเลี้ยว
+    const angleDiff = Math.PI / 2; 
     const endAngle = isNoseRight ? backAngle - angleDiff : backAngle + angleDiff;
 
     const getPt = (r, ang) => ({
@@ -341,19 +347,30 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
         y: py + Math.sin(ang) * r
     });
 
+    // จุดพิกัดของรูปทรงเสี้ยววงแหวน
     const p1i = getPt(innerR, backAngle);
     const p2i = getPt(innerR, endAngle);
     const p1o = getPt(outerR, backAngle);
     const p2o = getPt(outerR, endAngle);
 
-    const d = `M ${p1i.x} ${p1i.y} A ${innerR} ${innerR} 0 0 ${sweepFlag} ${p2i.x} ${p2i.y} 
-               L ${p2o.x} ${p2o.y} A ${outerR} ${outerR} 0 0 ${1-sweepFlag} ${p1o.x} ${p1o.y} Z`;
+    // สร้างเส้น Path ของ Jet Blast
+    // 1-sweepFlag ในส่วนที่สองเพื่อให้วาดโค้งกลับมาที่จุดเริ่มอย่างถูกต้อง
+    const d = `
+        M ${p1i.x} ${p1i.y} 
+        A ${innerR} ${innerR} 0 0 ${sweepFlag} ${p2i.x} ${p2i.y}
+        L ${p2o.x} ${p2o.y}
+        A ${outerR} ${outerR} 0 0 ${1 - sweepFlag} ${p1o.x} ${p1o.y}
+        Z
+    `;
 
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
-    p.setAttribute("style", `fill: ${isDanger ? 'rgba(231, 76, 60, 0.4)' : 'rgba(46, 204, 113, 0.2)'}; 
-                             stroke: ${isDanger ? '#e74c3c' : '#2ecc71'}; 
-                             stroke-width: 1.5; stroke-dasharray: 4; pointer-events: none;`);
+    
+    // กำหนดสีตามความปลอดภัย: แดง (isDanger) / เขียว (Safe)
+    const color = isDanger ? 'rgba(231, 76, 60, 0.4)' : 'rgba(46, 204, 113, 0.2)';
+    const stroke = isDanger ? '#e74c3c' : '#2ecc71';
+    
+    p.setAttribute("style", `fill: ${color}; stroke: ${stroke}; stroke-width: 1.5; stroke-dasharray: 4; pointer-events: none;`);
     layer.appendChild(p);
 }
 
