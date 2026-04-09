@@ -328,17 +328,20 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
     const innerR = tailDist; 
     const outerR = tailDist + jetRange;
     
+    // มุมหัวเครื่อง (Radian)
     const baseRad = (rot - 90) * Math.PI / 180;
-    const backAngle = baseRad + Math.PI; // ทิศด้านหลังเครื่องตรงๆ
+    // ทิศท้ายเครื่อง (ตรงข้ามหัว)
+    const backAngle = baseRad + Math.PI;
 
-    // --- LOGIC แก้ไขใหม่ให้สวนทางกับจมูก ---
-    // ถ้าจมูกเลี้ยวขวา (isNoseRight=true) -> ท้ายต้องเหวี่ยงไป "ซ้าย" (ทวนเข็ม/CCW) -> sweepFlag = 0
-    // ถ้าจมูกเลี้ยวซ้าย (isNoseRight=false) -> ท้ายต้องเหวี่ยงไป "ขวา" (ตามเข็ม/CW) -> sweepFlag = 1
+    /**
+     * LOGIC ทิศทางลม (สวนทางกับจมูก):
+     * เลี้ยวขวา (isNoseRight=true) -> ท้ายเหวี่ยงไป "ซ้าย" (ทวนเข็ม / Sweep 0)
+     * เลี้ยวซ้าย (isNoseRight=false) -> ท้ายเหวี่ยงไป "ขวา" (ตามเข็ม / Sweep 1)
+     */
     const sweepFlag = isNoseRight ? 0 : 1; 
     
-    // กำหนดมุมสิ้นสุดของการเหวี่ยงท้าย (กวาด 90 องศา)
-    // สำหรับ SVG: ทวนเข็มคือลบ (-) / ตามเข็มคือบวก (+)
-    const angleDiff = Math.PI / 2; 
+    // กวาดไป 90 องศา (PI/2)
+    const angleDiff = Math.PI / 2;
     const endAngle = isNoseRight ? backAngle - angleDiff : backAngle + angleDiff;
 
     const getPt = (r, ang) => ({
@@ -351,8 +354,7 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
     const p1o = getPt(outerR, backAngle);
     const p2o = getPt(outerR, endAngle);
 
-    // วาดเสี้ยววงแหวนของลมพ่น
-    // sweep-flag ตัวแรกใช้ตาม Logic ทิศทาง, ตัวที่สอง (1-sweep) ใช้สำหรับวาดขอบกลับมาที่จุดเริ่ม
+    // วาดเสี้ยววงแหวน
     const d = `
         M ${p1i.x} ${p1i.y} 
         A ${innerR} ${innerR} 0 0 ${sweepFlag} ${p2i.x} ${p2i.y}
@@ -364,19 +366,21 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
     
-    // กำหนดสี: แดง (ไม่ปลอดภัย) / เขียว (ปลอดภัย)
-    const fillColor = isDanger ? 'rgba(231, 76, 60, 0.4)' : 'rgba(46, 204, 113, 0.2)';
-    const strokeColor = isDanger ? '#e74c3c' : '#2ecc71';
+    // กำหนดสี: แดง (อันตราย) / เขียว (ปลอดภัย)
+    const color = isDanger ? 'rgba(231, 76, 60, 0.4)' : 'rgba(46, 204, 113, 0.2)';
+    const stroke = isDanger ? '#e74c3c' : '#2ecc71';
     
-    p.setAttribute("style", `fill: ${fillColor}; stroke: ${strokeColor}; stroke-width: 1.5; stroke-dasharray: 4; pointer-events: none;`);
+    p.setAttribute("style", `fill: ${color}; stroke: ${stroke}; stroke-width: 1.5; stroke-dasharray: 4; pointer-events: none;`);
     layer.appendChild(p);
 }
 
 function getJetSafetyData(alloc, idx) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
+    if (!ac) return { isDanger: false, gap: null };
+
     const jetRange = ac.JetBlast || 0;
     const tailDist = ac.Length - ac.NoseToPivot;
-    const maxReach = tailDist + jetRange;
+    const maxReachFromPivot = tailDist + jetRange;
 
     let minGap = Infinity;
     let targetFound = false;
@@ -385,20 +389,20 @@ function getJetSafetyData(alloc, idx) {
         if (idx === otIdx) return;
         
         const acOther = db.aircrafts.find(o => o.Model === other.model);
-        const pOff = ac.PivotOffset * SCALE;
-        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
-        const mlgY = alloc.y + (ac.NoseToPivot * SCALE);
+        if (!acOther) return;
 
-        // --- เช็คฝั่งที่ Jet Blast เหวี่ยงไปจริง ---
-        // จมูกขวา (0) -> ท้ายไปซ้าย (เช็ค x ที่น้อยกว่า)
-        // จมูกซ้าย (1) -> ท้ายไปขวา (เช็ค x ที่มากกว่า)
-        const isTargetSide = (alloc.turnMode === 0 && other.x < alloc.x) || (alloc.turnMode === 1 && other.x > alloc.x);
+        const pOff = ac.PivotOffset * SCALE;
+        // จุดหมุน (Pivot): เลี้ยวขวา(0) ใช้ล้อขวา / เลี้ยวซ้าย(1) ใช้ล้อซ้าย
+        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
+
+        // เช็คฝั่งที่ Jet Blast เหวี่ยงไปจริง:
+        // หัวเลี้ยวขวา (0) -> ท้ายไปซ้าย (เช็คเครื่องที่ X น้อยกว่าเรา)
+        // หัวเลี้ยวซ้าย (1) -> ท้ายไปขวา (เช็คเครื่องที่ X มากกว่าเรา)
+        const isTowardJetSide = (alloc.turnMode === 0 && other.x < alloc.x) || (alloc.turnMode === 1 && other.x > alloc.x);
         
-        if (isTargetSide) {
-            // ระยะทางจากจุดหมุนไปเครื่องข้างๆ
-            const distPivotToNeighbor = Math.abs(pivotX - other.x) / SCALE;
-            // ระยะปลอดภัย = ระยะห่าง - (รัศมีลมพ่นสูงสุด + ครึ่งปีกเครื่องข้างๆ)
-            const currentGap = distPivotToNeighbor - (maxReach + (acOther.Span/2));
+        if (isTowardJetSide) {
+            const distBetweenPivotAndNeighborCenter = Math.abs(pivotX - other.x) / SCALE;
+            const currentGap = distBetweenPivotAndNeighborCenter - (maxReachFromPivot + (acOther.Span/2));
             
             if (currentGap < minGap) {
                 minGap = currentGap;
@@ -407,10 +411,7 @@ function getJetSafetyData(alloc, idx) {
         }
     });
 
-    return { 
-        isDanger: targetFound && minGap < 0, 
-        gap: targetFound ? minGap : null 
-    };
+    return { isDanger: targetFound && minGap < 0, gap: targetFound ? minGap : null };
 }
     
 function checkDynamicJetConflict(alloc, idx) {
