@@ -105,6 +105,18 @@
     const SCALE = 4, HEADER_Y = 100;
 dragElement(document.getElementById("audit-float"));
 
+function selectAC(ac, el) {
+    document.querySelectorAll('.ac-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    selectedAC = ac;
+    
+    // แสดงเงาเครื่องบินทันที
+    const ghost = document.getElementById('ghost-group');
+    ghost.style.display = 'block'; 
+    document.getElementById('cancel-btn').style.display = 'block';
+    
+    updateRotPreview(currentRotation); // คำนวณขนาดเงาทันที
+}
 function dragElement(elmnt) {
   var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
   if (document.getElementById("audit-drag-handle")) {
@@ -179,7 +191,7 @@ function dragElement(elmnt) {
         return pt.matrixTransform(svg.getScreenCTM().inverse());
     }
 
-   function handleSvgClick(e) {
+ function handleSvgClick(e) {
     if (!selectedAC) return;
     const pt = getSvgPt(e);
     const mode = document.getElementById('place-mode').value;
@@ -199,23 +211,26 @@ function dragElement(elmnt) {
         }
     }
 
-    if (bestSt) {
+    if (bestSt && snapY) {
         const st = db.stands.find(s => s.StandID === bestSt);
         const minY = HEADER_Y + (12.5*SCALE), maxY = HEADER_Y + (st.Length-12.5)*SCALE;
         if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
 
-        allocations.push({ 
+        const newAlloc = { 
             id: Date.now(), 
             standId: bestSt, 
             model: selectedAC.Model, 
             x: snapX, y: snapY, 
             rotation: currentRotation, 
             turnMode: 0 
-        });
+        };
+        
+        allocations.push(newAlloc);
         activeIdx = allocations.length - 1;
+        
         cancelSelection();
-        draw(); // วาดทันที
-        updateAudit(allocations[activeIdx], activeIdx); // แสดงพาแนลทันที
+        draw(); // วาดทุกอย่างใหม่รวมถึงเครื่องที่เพิ่งวาง
+        updateAudit(newAlloc, activeIdx); // บั๊กที่ 2: เรียกใช้ฟังก์ชันรายละเอียดทันที
     }
 }
 
@@ -288,22 +303,23 @@ function syncRot(val, target) {
 }
 
 // 2. ปรับปรุงการวาด Arc ให้เป็น 180 องศาด้านบน (Nose side)
-function drawArc(layer, px, py, r, isRight, isDanger, rot) {
+function drawArc(layer, px, py, r, isRightTurn, isDanger, rot) {
     const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
     const baseRad = (rot - 90) * Math.PI / 180;
     
-    // คำนวณมุม: เลี้ยวขวา (Right) กวาดจากซ้ายไปขวา | เลี้ยวซ้าย (Left) กวาดจากขวาไปซ้าย
-    // 0 องศาของ Arc เริ่มที่ทิศตะวันออก (ขวา) ของจุดหมุน
-    const startAngle = isRight ? baseRad + Math.PI : baseRad; 
-    const endAngle = isRight ? baseRad : baseRad - Math.PI;
+    // จุดเริ่ม (ปีกด้านหนึ่ง) และจุดจบ (ปีกอีกด้านหนึ่ง) 
+    // กวาดโค้ง 180 องศาผ่านด้านหน้าหัวเครื่อง
+    const startAngle = isRightTurn ? baseRad + Math.PI : baseRad; 
+    const endAngle = isRightTurn ? baseRad : baseRad - Math.PI;
 
     const startX = px + Math.cos(startAngle) * r;
     const startY = py + Math.sin(startAngle) * r;
     const endX = px + Math.cos(endAngle) * r;
     const endY = py + Math.sin(endAngle) * r;
 
-    // large-arc-flag = 0, sweep-flag: Right = 1 (CW), Left = 0 (CCW)
-    const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${isRight ? 1 : 0} ${endX} ${endY}`;
+    // sweep-flag: 1 คือตามเข็ม (เลี้ยวขวา), 0 คือทวนเข็ม (เลี้ยวซ้าย)
+    const sweepFlag = isRightTurn ? 1 : 0;
+    const d = `M ${startX} ${startY} A ${r} ${r} 0 0 ${sweepFlag} ${endX} ${endY}`;
     
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
@@ -363,6 +379,7 @@ function drawSpecificGap(layer, alloc, idx) {
 
     // 4. ปรับปรุง Audit Panel ให้แสดงรายละเอียดตามที่ต้องการ
 function updateAudit(alloc, idx) {
+    if (!alloc) return; // กัน Error กรณีข้อมูลว่าง
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
     const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
     const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
@@ -371,27 +388,22 @@ function updateAudit(alloc, idx) {
     const float = document.getElementById('audit-float');
     float.style.display = 'block';
 
-    // 2. คำนวณรัศมีกวาดรวม (R_Total = PivotOffset + R4 + ExtraMargin)
+    // 2. คำนวณรัศมีกวาดรวม
     const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
     
-    // 3. ค้นหาเครื่องบินข้างเคียงในทิศทางที่จะเลี้ยว
+    // 3. ค้นหาเครื่องบินข้างเคียง
     let neighbor = null, minDist = Infinity;
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
-        
-        // ตรรกะการหาเพื่อนบ้าน: 
-        // ถ้าเลี้ยวขวา (mode 0) เช็คเครื่องที่อยู่ทางขวา (other.x > alloc.x)
-        // ถ้าเลี้ยวซ้าย (mode 1) เช็คเครื่องที่อยู่ทางซ้าย (other.x < alloc.x)
         const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
         const d = Math.abs(alloc.x - other.x) / SCALE;
-        
         if (isToward && d < minDist) { 
             minDist = d; 
             neighbor = other; 
         }
     });
 
-    // 4. เตรียมข้อมูลแสดงผล
+    // 4. เตรียมข้อมูลแสดงผล (คงเดิมตามที่คุณส่งมา)
     let auditHTML = `
         <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:15px;">
             <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
@@ -407,15 +419,8 @@ function updateAudit(alloc, idx) {
 
     if (neighbor) {
         const otAc = db.aircrafts.find(a => a.Model === neighbor.model);
-        
-        // คำนวณระยะห่างขณะเลี้ยว (Dynamic)
-        // สูตร: (ระยะห่างหลุม) - (ระยะเหวี่ยงเรา + ครึ่งปีกเขา)
         const dynamicGap = minDist - (totalReach + (otAc.Span / 2));
-        
-        // คำนวณระยะห่างขณะจอดนิ่ง (Static)
-        // สูตร: (ระยะห่างหลุม) - (ครึ่งปีกเรา + ครึ่งปีกเขา)
         const staticGap = minDist - (ac.Span / 2 + otAc.Span / 2);
-        
         const isSafe = (dynamicGap >= 0) && (staticGap >= rule.MinClearance);
 
         auditHTML += `
