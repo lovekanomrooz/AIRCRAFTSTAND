@@ -2,9 +2,9 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>Advanced Apron Planner - Parallel & Rotation Support</title>
+    <title>Advanced Aircraft Turning & Stand Planner</title>
     <style>
-        :root { --bg: #1e1e1e; --panel: #2d2d2d; --safe: #2ecc71; --danger: #e74c3c; --accent: #f1c40f; }
+        :root { --bg: #1a1a1a; --panel: #2d2d2d; --safe: #2ecc71; --danger: #e74c3c; --accent: #f1c40f; }
         body { margin: 0; display: flex; height: 100vh; font-family: 'Sarabun', sans-serif; background: var(--bg); color: white; overflow: hidden; }
         
         #sidebar { width: 320px; background: var(--panel); padding: 20px; border-right: 2px solid #000; overflow-y: auto; z-index: 100; }
@@ -15,19 +15,20 @@
         svg { background: #1a1a1a; min-width: 5000px; height: 100%; cursor: crosshair; }
 
         .headerline { stroke: white; stroke-width: 4; }
-        .boundary-line { stroke: rgba(231, 76, 60, 0.5); stroke-width: 2; stroke-dasharray: 5,5; fill: none; }
-        .t-mark { fill: var(--accent); cursor: pointer; opacity: 0.7; }
+        .boundary-line { stroke: rgba(231, 76, 60, 0.4); stroke-width: 2; stroke-dasharray: 5,5; fill: none; }
+        .t-mark { fill: var(--accent); cursor: pointer; }
         .stand-box { fill: rgba(255,255,255,0.02); stroke: #444; }
         
-        .ac-body { fill: #fff; stroke: #333; cursor: grab; }
+        .ac-body { fill: #fff; stroke: #333; }
         .ac-wing { fill: #bdc3c7; stroke: #333; }
-        .swing-path { fill: none; stroke-width: 2.5; pointer-events: none; }
-        .safe { stroke: var(--safe); }
-        .unsafe { stroke: var(--danger); }
+        .pivot-dot { fill: #ff3e3e; r: 4; } /* จุดหมุนล้อหลัก */
+
+        .swing-path { fill: rgba(255, 71, 87, 0.1); stroke-width: 2.5; stroke-dasharray: none; pointer-events: none; }
+        .safe { stroke: var(--safe); fill: rgba(46, 204, 113, 0.1); }
+        .unsafe { stroke: var(--danger); fill: rgba(231, 76, 60, 0.2); }
         
         #ghost-group { pointer-events: none; display: none; }
-        
-        .control-box { background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; margin-top: 10px; border: 1px solid #444; }
+        .control-box { background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; margin-top: 10px; border: 1px solid #444; }
         input[type=range] { width: 100%; }
         #status-bar { position: absolute; top: 10px; left: 340px; background: rgba(0,0,0,0.8); padding: 8px 15px; border-radius: 20px; font-size: 13px; z-index: 50; border: 1px solid #444; }
     </style>
@@ -35,32 +36,34 @@
 <body>
 
 <div id="sidebar">
-    <h3 style="color: var(--safe)">✈️ คลังเครื่องบิน</h3>
+    <h3 style="color: var(--safe)">✈️ ระบบจัดสรรหลุมจอด</h3>
     <div id="aircraft-list">โหลดข้อมูล...</div>
     
     <div class="control-box">
-        <label>องศาการหมุน (หัวเครื่อง): <span id="deg-val">0</span>°</label>
+        <label>องศาหัวเครื่อง: <span id="deg-val">0</span>°</label>
         <input type="range" id="ac-rotation" min="0" max="360" value="0" oninput="updateRotationPreview(this.value)">
-        <label style="margin-top:10px; display:block;">โหมดการวาง:</label>
-        <select id="place-mode" style="width:100%; padding:5px; background:#444; color:white; border:none;">
-            <option value="snap">Snap เข้าจุด T-Mark (มาตรฐาน)</option>
-            <option value="free">อิสระ (Parallel / ขนาน)</option>
+        
+        <label style="margin-top:10px; display:block;">โหมดเลี้ยว:</label>
+        <select id="swing-mode" style="width:100%; padding:5px; background:#444; color:white; border:none;" onchange="draw()">
+            <option value="right">เลี้ยวขวา (Pivot LH Gear)</option>
+            <option value="left">เลี้ยวซ้าย (Pivot RH Gear)</option>
+            <option value="both">แสดงทั้งสองฝั่ง</option>
         </select>
     </div>
 
     <hr style="border:0.5px solid #444; margin:20px 0;">
     <div style="font-size: 0.8em; color: #aaa;">
         <b>คำแนะนำ:</b><br>
-        - ในโหมดอิสระ คลิกพื้นที่ใดก็ได้ในหลุมจอดเพื่อวาง<br>
-        - <b>เขตสีแดง:</b> ห้ามจอด (ระยะ 12.5ม. จากหัว/ท้าย)<br>
-        - คลิกเครื่องที่วางแล้วเพื่อเลือกใหม่/ปรับองศา<br>
-        - ดับเบิลคลิกเพื่อลบออก
+        - คลิกเครื่องบิน -> คลิกในหลุมเพื่อวาง<br>
+        - <span style="color:#ff3e3e;">●</span> จุดสีแดงคือ <b>จุดหมุน (Pivot)</b> ที่ล้อหลัก<br>
+        - เส้นโค้งแสดง <b>รัศมีกวาดปีก (Sweep)</b> 180°<br>
+        - ดับเบิลคลิกเครื่องเพื่อลบออก
     </div>
-    <button id="cancel-btn" onclick="cancelSelection()" style="display:none; width:100%; margin-top:15px; padding:10px; background:var(--danger); border:none; color:white; cursor:pointer;">ยกเลิก</button>
+    <button id="cancel-btn" onclick="cancelSelection()" style="display:none; width:100%; margin-top:15px; padding:10px; background:var(--danger); border:none; color:white; cursor:pointer;">ยกเลิกการเลือก</button>
 </div>
 
 <div id="viewport">
-    <div id="status-bar">🛰️ กำลังเชื่อมต่อฐานข้อมูล...</div>
+    <div id="status-bar">🛰️ กำลังเชื่อมต่อข้อมูล...</div>
     <svg id="apron-svg" onmousemove="moveGhost(event)" onclick="handleSvgClick(event)">
         <defs>
             <marker id="arrow-safe" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2ecc71"/></marker>
@@ -85,10 +88,10 @@
         try {
             const res = await fetch(API_URL);
             db = await res.json();
-            document.getElementById('status-bar').innerHTML = "🟢 ฐานข้อมูลออนไลน์: พร้อมใช้งาน";
+            document.getElementById('status-bar').innerHTML = "🟢 ฐานข้อมูลออนไลน์";
             renderList();
             draw();
-        } catch (e) { document.getElementById('status-bar').innerHTML = "🔴 เชื่อมต่อฐานข้อมูลล้มเหลว"; }
+        } catch (e) { document.getElementById('status-bar').innerHTML = "🔴 เชื่อมต่อ GS ไม่สำเร็จ"; }
     }
 
     function renderList() {
@@ -98,37 +101,27 @@
             const div = document.createElement('div');
             div.className = 'ac-item';
             div.innerText = ac.Model;
-            div.onclick = () => selectAC(ac, div);
+            div.onclick = () => {
+                document.querySelectorAll('.ac-item').forEach(i => i.classList.remove('selected'));
+                div.classList.add('selected');
+                selectedAC = ac;
+                document.getElementById('ghost-group').style.display = 'block';
+                document.getElementById('cancel-btn').style.display = 'block';
+                updateRotationPreview(currentRotation);
+            };
             list.appendChild(div);
         });
-    }
-
-    function selectAC(ac, el) {
-        document.querySelectorAll('.ac-item').forEach(i => i.classList.remove('selected'));
-        el.classList.add('selected');
-        selectedAC = ac;
-        document.getElementById('ghost-group').style.display = 'block';
-        document.getElementById('cancel-btn').style.display = 'block';
-        updateRotationPreview(currentRotation);
     }
 
     function updateRotationPreview(val) {
         currentRotation = parseInt(val);
         document.getElementById('deg-val').innerText = val;
         if (!selectedAC) return;
-        const span = selectedAC.Span * SCALE, len = selectedAC.Length * SCALE, noseToPivot = selectedAC.NoseToPivot * SCALE;
-        document.getElementById('ghost-wing').setAttribute("d", `M 0,${noseToPivot} L ${-span/2},${noseToPivot+10} L ${span/2},${noseToPivot+10} Z`);
+        const span = selectedAC.Span * SCALE, len = selectedAC.Length * SCALE, n2p = selectedAC.NoseToPivot * SCALE;
+        document.getElementById('ghost-wing').setAttribute("d", `M 0,${n2p} L ${-span/2},${n2p+10} L ${span/2},${n2p+10} Z`);
         document.getElementById('ghost-body').setAttribute("x", -span/16);
         document.getElementById('ghost-body').setAttribute("width", span/8);
         document.getElementById('ghost-body').setAttribute("height", len);
-        document.getElementById('ghost-group').setAttribute("transform", `translate(0,0) rotate(${currentRotation})`);
-    }
-
-    function cancelSelection() {
-        selectedAC = null;
-        document.getElementById('ghost-group').style.display = 'none';
-        document.getElementById('cancel-btn').style.display = 'none';
-        document.querySelectorAll('.ac-item').forEach(i => i.classList.remove('selected'));
     }
 
     function moveGhost(e) {
@@ -147,131 +140,136 @@
     function handleSvgClick(e) {
         if (!selectedAC) return;
         const pt = getSvgPt(e);
-        const mode = document.getElementById('place-mode').value;
-        
-        // หาว่าคลิกอยู่ในหลุมไหน
-        let stand = db.stands.find(st => {
-            const centerX = getStandCenterX(st);
-            const halfW = (st.Width * SCALE) / 2;
-            return pt.x >= centerX - halfW && pt.x <= centerX + halfW && pt.y >= HEADER_Y && pt.y <= HEADER_Y + (st.Length * SCALE);
+        // ค้นหาหลุมจอด
+        const stand = db.stands.find(st => {
+            const cx = getStandCenterX(st);
+            const hw = (st.Width * SCALE) / 2;
+            return pt.x >= cx - hw && pt.x <= cx + hw && pt.y >= HEADER_Y && pt.y <= HEADER_Y + (st.Length * SCALE);
         });
-
         if (!stand) return;
 
-        // ตรวจสอบ Boundary (ห้ามเกิน 12.5ม. จากหัว/ท้าย)
-        const minY = HEADER_Y + (12.5 * SCALE);
-        const maxY = HEADER_Y + (stand.Length * SCALE) - (12.5 * SCALE);
-        
-        let targetY = pt.y, targetX = pt.x;
-
-        if (mode === 'snap') {
-            const t1Y = HEADER_Y + (12.5 * SCALE), t2Y = HEADER_Y + (30.0 * SCALE);
-            targetY = Math.abs(pt.y - t1Y) < Math.abs(pt.y - t2Y) ? t1Y : t2Y;
-            targetX = getStandCenterX(stand);
-        }
-
-        if (targetY < minY || targetY > maxY) {
-            alert("⚠️ ตำแหน่ง Nose Gear อยู่นอกเขตพื้นที่ปลอดภัย (ห้ามจอดใกล้ Header/Tail เกิน 12.5ม.)");
-            return;
-        }
-
-        allocations.push({ standId: stand.StandID, model: selectedAC.Model, x: targetX, y: targetY, rotation: currentRotation, mode: 0 });
+        allocations.push({ 
+            standId: stand.StandID, 
+            model: selectedAC.Model, 
+            x: pt.x, y: pt.y, 
+            rotation: currentRotation 
+        });
         draw();
-        if (mode === 'snap') cancelSelection();
     }
 
     function getStandCenterX(st) {
-        let currentX = 100;
+        let curX = 100;
         for (let s of db.stands) {
             const w = s.Width * SCALE;
-            const cx = s.ParentID ? getStandCenterX(db.stands.find(p => p.StandID === s.ParentID)) + (s.OffsetX * SCALE) : currentX + (w / 2);
+            const cx = s.ParentID ? getStandCenterX(db.stands.find(p => p.StandID === s.ParentID)) + (s.OffsetX * SCALE) : curX + (w / 2);
             if (s.StandID === st.StandID) return cx;
-            if (!s.ParentID) currentX += w + (5 * SCALE);
+            if (!s.ParentID) curX += w + (5 * SCALE);
         }
     }
 
     function draw() {
         const layer = document.getElementById('main-layer');
         layer.innerHTML = '';
-        let currentX = 100;
-        let xPosMap = {};
+        let curX = 100;
+        let xMap = {};
 
+        // วาดหลุมจอด
         db.stands.forEach(st => {
-            const standW = st.Width * SCALE, standL = st.Length * SCALE;
-            let centerX = st.ParentID ? xPosMap[st.ParentID] + (st.OffsetX * SCALE) : currentX + (standW / 2);
-            xPosMap[st.StandID] = centerX;
-
-            layer.innerHTML += `<rect x="${centerX - standW/2}" y="${HEADER_Y}" width="${standW}" height="${standL}" class="stand-box" />`;
-            layer.innerHTML += `<line x1="${centerX - standW/2}" y1="${HEADER_Y}" x2="${centerX + standW/2}" y2="${HEADER_Y}" class="headerline" />`;
-            
-            // วาด Boundary Lines (12.5m)
-            layer.innerHTML += `<rect x="${centerX - standW/2}" y="${HEADER_Y + (12.5*SCALE)}" width="${standW}" height="${(st.Length - 25)*SCALE}" class="boundary-line" />`;
-            
-            layer.innerHTML += `<circle cx="${centerX}" cy="${HEADER_Y + (12.5*SCALE)}" r="6" class="t-mark" />`;
-            layer.innerHTML += `<circle cx="${centerX}" cy="${HEADER_Y + (30.0*SCALE)}" r="6" class="t-mark" />`;
-            layer.innerHTML += `<text x="${centerX}" y="${HEADER_Y + standL + 25}" fill="#888" text-anchor="middle" font-size="12">${st.StandID}</text>`;
-            if (!st.ParentID) currentX += standW + (5 * SCALE);
+            const sw = st.Width * SCALE, sl = st.Length * SCALE;
+            let cx = st.ParentID ? xMap[st.ParentID] + (st.OffsetX * SCALE) : curX + (sw / 2);
+            xMap[st.StandID] = cx;
+            layer.innerHTML += `<rect x="${cx - sw/2}" y="${HEADER_Y}" width="${sw}" height="${sl}" class="stand-box" />`;
+            layer.innerHTML += `<rect x="${cx - sw/2}" y="${HEADER_Y + 12.5*SCALE}" width="${sw}" height="${(st.Length-25)*SCALE}" class="boundary-line" />`;
+            layer.innerHTML += `<text x="${cx}" y="${HEADER_Y + sl + 25}" fill="#888" text-anchor="middle" font-size="12">${st.StandID}</text>`;
+            if (!st.ParentID) curX += sw + (5 * SCALE);
         });
 
+        // วาดเครื่องบิน
+        const swingMode = document.getElementById('swing-mode').value;
         allocations.forEach((alloc, idx) => {
             const ac = db.aircrafts.find(a => a.Model === alloc.model);
-            const noseX = alloc.x, noseY = alloc.y, rot = alloc.rotation;
+            const nx = alloc.x, ny = alloc.y, rot = alloc.rotation;
             
-            // คำนวณ Pivot Point (ล้อหลัง) อิงตามการหมุน
+            // คำนวณจุดกึ่งกลางล้อหลัก (MLG Center)
             const rad = (rot - 90) * (Math.PI / 180);
-            const pivotDist = ac.NoseToPivot * SCALE;
-            const pivotX = noseX - Math.cos(rad) * pivotDist;
-            const pivotY = noseY - Math.sin(rad) * pivotDist;
+            const pDist = ac.NoseToPivot * SCALE;
+            const mlgCx = nx - Math.cos(rad) * pDist;
+            const mlgCy = ny - Math.sin(rad) * pDist;
 
-            // ตรวจสอบความปลอดภัย
-            const isDanger = checkSafety(alloc, idx);
+            // จุดหมุน (Pivot)
+            const pOffset = ac.PivotOffset * SCALE;
+            const pRad = (rot * Math.PI) / 180;
+            
+            // ล้อซ้าย (LH)
+            const lhpX = mlgCx + Math.cos(pRad) * pOffset;
+            const lhpY = mlgCy + Math.sin(pRad) * pOffset;
+            // ล้อขวา (RH)
+            const rhpX = mlgCx - Math.cos(pRad) * pOffset;
+            const rhpY = mlgCy - Math.sin(pRad) * pOffset;
 
-            drawSwing(layer, noseX, noseY, pivotX, pivotY, ac, rot, isDanger);
+            // วาดเส้นกวาด (Swing Arcs)
+            if (swingMode === 'right' || swingMode === 'both') {
+                drawAdvancedArc(layer, lhpX, lhpY, ac, rot, true, idx); // หมุนรอบซ้าย เลี้ยวขวา
+            }
+            if (swingMode === 'left' || swingMode === 'both') {
+                drawAdvancedArc(layer, rhpX, rhpY, ac, rot, false, idx); // หมุนรอบขวา เลี้ยวซ้าย
+            }
 
+            // วาดตัวเครื่อง
             const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-            g.setAttribute("transform", `translate(${noseX}, ${noseY}) rotate(${rot})`);
+            g.setAttribute("transform", `translate(${nx}, ${ny}) rotate(${rot})`);
             g.innerHTML = `
                 <path d="M 0,${ac.NoseToPivot*SCALE} L ${-ac.Span*SCALE/2},${(ac.NoseToPivot+3)*SCALE} L ${ac.Span*SCALE/2},${(ac.NoseToPivot+3)*SCALE} Z" class="ac-wing" />
                 <rect x="${-ac.Span*SCALE/16}" y="0" width="${ac.Span*SCALE/8}" height="${ac.Length*SCALE}" rx="8" class="ac-body" />
                 <circle cx="0" cy="0" r="4" fill="red" />
-                <text y="-10" fill="yellow" text-anchor="middle" font-size="11" font-weight="bold" transform="rotate(${-rot})">${ac.Model}</text>
             `;
-            g.onclick = (e) => { e.stopPropagation(); allocations[idx].mode = (alloc.mode + 1) % 3; draw(); };
-            g.ondblclick = (e) => { e.stopPropagation(); allocations.splice(idx, 1); draw(); };
+            g.ondblclick = () => { allocations.splice(idx, 1); draw(); };
             layer.appendChild(g);
+
+            // แสดงจุดหมุนบนแผนที่
+            layer.innerHTML += `<circle cx="${lhpX}" cy="${lhpY}" class="pivot-dot" />`;
+            layer.innerHTML += `<circle cx="${rhpX}" cy="${rhpY}" class="pivot-dot" />`;
         });
     }
 
-    function drawSwing(layer, nx, ny, px, py, ac, rot, isDanger) {
-        const r = ac.SweepRadius * SCALE, pOff = ac.PivotOffset * SCALE;
-        const rad = (rot * Math.PI) / 180;
+    function drawAdvancedArc(layer, px, py, ac, rot, isRightTurn, myIdx) {
+        const r = ac.SweepRadius * SCALE;
+        const startAngle = isRightTurn ? rot : rot - 180;
+        const endAngle = isRightTurn ? rot + 180 : rot;
         
-        // จุดหมุนล้อหลังซ้าย/ขวา
-        const p1x = px + Math.cos(rad) * pOff, p1y = py + Math.sin(rad) * pOff;
-        const p2x = px - Math.cos(rad) * pOff, p2y = py - Math.sin(rad) * pOff;
+        // ตรวจสอบการชน
+        const isDanger = checkCollision(px, py, r, myIdx);
+        const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
 
-        [p1x, p2x].forEach((pivotX, i) => {
-            const pivotY = i === 0 ? p1y : p2y;
-            const marker = isDanger ? 'url(#arrow-danger)' : 'url(#arrow-safe)';
-            const d = `M ${pivotX + Math.cos(rad-Math.PI/2)*r} ${pivotY + Math.sin(rad-Math.PI/2)*r} A ${r} ${r} 0 0 ${i===0?1:0} ${pivotX + Math.cos(rad)*r} ${pivotY + Math.sin(rad)*r}`;
-            const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            p.setAttribute("d", d); p.setAttribute("class", `swing-path ${isDanger?'unsafe':'safe'}`);
-            p.setAttribute("style", `marker-end: ${marker}`);
-            layer.appendChild(p);
-        });
+        // วาดครึ่งวงกลม (180 องศา) ตามรูปต้นฉบับ
+        const x1 = px + Math.cos((startAngle) * Math.PI / 180) * r;
+        const y1 = py + Math.sin((startAngle) * Math.PI / 180) * r;
+        const x2 = px + Math.cos((endAngle) * Math.PI / 180) * r;
+        const y2 = py + Math.sin((endAngle) * Math.PI / 180) * r;
+
+        const d = `M ${x1} ${y1} A ${r} ${r} 0 0 ${isRightTurn ? 1 : 1} ${x2} ${y2}`;
+        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        p.setAttribute("d", d);
+        p.setAttribute("class", `swing-path ${isDanger ? 'unsafe' : 'safe'}`);
+        p.setAttribute("style", `marker-end: ${marker}`);
+        layer.appendChild(p);
     }
 
-    function checkSafety(alloc, myIdx) {
-        const ac = db.aircrafts.find(a => a.Model === alloc.model);
-        const myRadius = (ac.PivotOffset + ac.SweepRadius);
-
+    function checkCollision(px, py, rPx, myIdx) {
         return allocations.some((other, otIdx) => {
             if (myIdx === otIdx) return false;
             const oAc = db.aircrafts.find(a => a.Model === other.model);
-            const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
-            // Simplified Safety: ระยะห่างระหว่าง Nose Gear < (รัศมีเหวี่ยง + ปีกเครื่องข้างๆ)
-            return dist < (myRadius + oAc.Span/2);
+            const dist = Math.sqrt(Math.pow(px - other.x, 2) + Math.pow(py - other.y, 2));
+            // ระยะห่างจากจุดหมุนไปเครื่องข้างๆ ต้องมากกว่า (รัศมีกวาด + ระยะครึ่งปีกเครื่องข้างๆ)
+            return dist < (rPx + (oAc.Span * SCALE / 2));
         });
+    }
+
+    function cancelSelection() {
+        selectedAC = null;
+        document.getElementById('ghost-group').style.display = 'none';
+        document.getElementById('cancel-btn').style.display = 'none';
+        document.querySelectorAll('.ac-item').forEach(i => i.classList.remove('selected'));
     }
 
     init();
