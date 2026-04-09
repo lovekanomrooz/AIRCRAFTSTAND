@@ -312,20 +312,44 @@
 }
 
     function drawSpecificGap(layer, alloc, idx) {
+    // 1. นำเครื่องบินทุกลำมาเรียงลำดับตามพิกัด X (ซ้ายไปขวา)
+    const sortedAlloc = [...allocations].sort((a, b) => a.x - b.x);
+    
+    // 2. หา Index ของเครื่องปัจจุบันในรายการที่เรียงแล้ว
+    const currentSortedIdx = sortedAlloc.findIndex(a => a.id === alloc.id);
+    
+    // 3. วาดเส้นเชื่อมเฉพาะกับเครื่องที่อยู่ "ถัดไปทางขวา" 1 ลำ (ถ้ามี)
+    if (currentSortedIdx < sortedAlloc.length - 1) {
+        const other = sortedAlloc[currentSortedIdx + 1];
         const myAc = db.aircrafts.find(a => a.Model === alloc.model);
-        allocations.forEach((other, otIdx) => {
-            if (idx === otIdx) return;
-            const dist = Math.abs(alloc.x - other.x) / SCALE;
-            if (dist < 120 && alloc.x < other.x) {
-                const otAc = db.aircrafts.find(a => a.Model === other.model);
-                const x1 = alloc.x + (myAc.Span * SCALE / 2), x2 = other.x - (otAc.Span * SCALE / 2);
-                const y = alloc.y + (myAc.NoseToPivot * SCALE);
-                const gap = (x2 - x1) / SCALE;
-                layer.innerHTML += `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" class="wing-gap-line" />`;
-                layer.innerHTML += `<text x="${(x1+x2)/2}" y="${y-10}" class="wing-gap-text" text-anchor="middle">${gap.toFixed(2)}m</text>`;
-            }
-        });
+        const otAc = db.aircrafts.find(a => a.Model === other.model);
+
+        // คำนวณจุดปลายปีก (ปีกขวาของเรา -> ปีกซ้ายของเขา)
+        const x1 = alloc.x + (myAc.Span * SCALE / 2);
+        const x2 = other.x - (otAc.Span * SCALE / 2);
+        const y1 = alloc.y + (myAc.NoseToPivot * SCALE);
+        const y2 = other.y + (otAc.NoseToPivot * SCALE);
+
+        const gapVal = (x2 - x1) / SCALE;
+
+        // วาดเส้นประสีฟ้า
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+        line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+        line.setAttribute("class", "wing-gap-line");
+        line.setAttribute("style", "stroke: #3498db; stroke-width: 2; stroke-dasharray: 5;");
+        layer.appendChild(line);
+
+        // วาดตัวเลขสีขาว
+        const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        txt.setAttribute("x", (x1 + x2) / 2);
+        txt.setAttribute("y", (y1 + y2) / 2 - 10);
+        txt.setAttribute("style", "fill: #ffffff; font-weight: bold; font-size: 14px; paint-order: stroke; stroke: #000; stroke-width: 2px;");
+        txt.setAttribute("text-anchor", "middle");
+        txt.textContent = gapVal.toFixed(2) + "m";
+        layer.appendChild(txt);
     }
+}
 
     function checkCollision(alloc, idx, margin) {
         const ac = db.aircrafts.find(a => a.Model === alloc.model);
@@ -339,55 +363,59 @@
         });
     }
 
-    function updateAudit(alloc, idx) {
-        if (!alloc) return;
-        const ac = db.aircrafts.find(a => a.Model === alloc.model);
-        const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
-        const margin = parseFloat(document.getElementById('extra-margin').value) || 0;
-        const totalReach = ac.PivotOffset + ac.SweepRadius + margin;
+  function updateAudit(alloc, idx) {
+    if (!alloc) return;
+    const ac = db.aircrafts.find(a => a.Model === alloc.model);
+    const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
+    const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
+    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
+
+    document.getElementById('audit-float').style.display = 'block';
+
+    // หาเพื่อนบ้านซ้ายและขวาที่ใกล้ที่สุด
+    let leftN = null, rightN = null;
+    let minL = Infinity, minR = Infinity;
+
+    allocations.forEach((other) => {
+        if (other.id === alloc.id) return;
+        const dist = Math.abs(alloc.x - other.x) / SCALE;
+        if (other.x < alloc.x && dist < minL) { minL = dist; leftN = other; }
+        if (other.x > alloc.x && dist < minR) { minR = dist; rightN = other; }
+    });
+
+    let auditHTML = `
+        <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
+        รุ่น: ${ac.Model} (Type ${ac.Code}) | เลี้ยว: ${alloc.turnMode === 0 ? 'ขวา ➡️' : 'ซ้าย ⬅️'}<hr>
         
-        document.getElementById('audit-float').style.display = 'block';
+        <b>1. การคำนวณรัศมีการกวาด:</b>
+        <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m) = ${totalReach.toFixed(2)}m</span>
+    `;
 
-        let neighbor = null, minDist = Infinity;
-        allocations.forEach((other, otIdx) => {
-            if (idx === otIdx) return;
-            const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
-            const d = Math.abs(alloc.x - other.x) / SCALE;
-            if (isToward && d < minDist) { minDist = d; neighbor = other; }
-        });
-
-        let auditHTML = `
-            <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:15px;">
-                <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
-                รุ่น: ${ac.Model} | เลี้ยว: ${alloc.turnMode === 0 ? 'ขวา ➡️' : 'ซ้าย ⬅️'}
-            </div>
-            <div class="audit-card">
-                <b>1. การคำนวณรัศมีการกวาด:</b>
-                <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${margin}m)</span>
-                <b style="color:var(--accent);">ระยะเหวี่ยงสุทธิ = ${totalReach.toFixed(2)} เมตร</b>
-            </div>
-        `;
-
-        if (neighbor) {
-            const otAc = db.aircrafts.find(a => a.Model === neighbor.model);
-            const dynamicGap = minDist - (totalReach + (otAc.Span / 2));
-            const staticGap = minDist - (ac.Span / 2 + otAc.Span / 2);
-            auditHTML += `
-                <div class="audit-card">
-                    <b>2. ระยะห่างขณะเลี้ยว (Dynamic):</b>
-                    <span class="formula">สูตร: ระยะ Center - (R_Total + ครึ่งปีกเครื่องข้างๆ)</span>
-                    <span class="formula">คำนวณ: ${minDist.toFixed(2)} - (${totalReach.toFixed(2)} + ${(otAc.Span/2).toFixed(2)})</span>
-                    <b style="color:${dynamicGap < 0 ? 'red' : '#2ecc71'}">คงเหลือ: ${dynamicGap.toFixed(2)} เมตร</b><br><br>
-                    <b>3. ระยะห่างปีกขณะจอด (Static):</b>
-                    <span class="formula">เกณฑ์มาตรฐาน Type ${ac.Code}: ${rule.MinClearance} เมตร</span>
-                    <b>ระยะจริง: ${staticGap.toFixed(2)} เมตร</b>
-                </div>
-            `;
-        } else {
-            auditHTML += `<p style="text-align:center; padding:20px; color:#aaa; border:1px dashed #666;">ไม่พบเครื่องบินในทิศทางการเลี้ยว</p>`;
+    // ฟังก์ชันช่วยสร้าง HTML สำหรับเพื่อนบ้านแต่ละฝั่ง
+    const getNeighborHTML = (neighbor, sideDist, label) => {
+        if (!neighbor) return `<p style="color:#888;">ไม่พบเครื่องบินฝั่ง${label}</p>`;
+        const otAc = db.aircrafts.find(a => a.Model === neighbor.model);
+        const staticGap = sideDist - (ac.Span / 2 + otAc.Span / 2);
+        const isToward = (alloc.turnMode === 0 && label === 'ขวา') || (alloc.turnMode === 1 && label === 'ซ้าย');
+        
+        let html = `<b>- ฝั่ง${label} (${neighbor.standId}):</b><br>`;
+        html += `<span style="font-size:0.9em;">Static Gap: <b style="color:${staticGap < rule.MinClearance ? 'red' : '#2ecc71'}">${staticGap.toFixed(2)}m</b> (เกณฑ์ ${rule.MinClearance}m)</span><br>`;
+        
+        if (isToward) {
+            const dynamicGap = sideDist - (totalReach + (otAc.Span / 2));
+            html += `<span style="font-size:0.9em;">Dynamic Gap: <b style="color:${dynamicGap < 0 ? 'red' : '#2ecc71'}">${dynamicGap.toFixed(2)}m</b> (ขณะเลี้ยว)</span><br>`;
         }
-        document.getElementById('audit-content').innerHTML = auditHTML;
-    }
+        return html;
+    };
+
+    auditHTML += `<div class="audit-card" style="margin-top:10px;">
+        <b>2. การตรวจสอบระยะห่าง (Clearance):</b><br>
+        ${getNeighborHTML(leftN, minL, 'ซ้าย')}
+        ${getNeighborHTML(rightN, minR, 'ขวา')}
+    </div>`;
+
+    document.getElementById('audit-content').innerHTML = auditHTML;
+}
 
     function cancelSelection() {
         selectedAC = null;
