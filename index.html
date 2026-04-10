@@ -184,47 +184,42 @@
         return pt.matrixTransform(svg.getScreenCTM().inverse());
     }
 
-  function handleSvgClick(e) {
-    if (!selectedAC) return;
-    const pt = getSvgPt(e);
-    const mode = document.getElementById('place-mode').value;
-    
-    // ค้นหาหลุมที่จุดคลิกอยู่ภายในขอบเขต และเลือกหลุมที่คลิกใกล้จุดศูนย์กลางที่สุด
-    let candidates = [];
-    for (let st of db.stands) {
-        const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
-        if (pt.x >= cx - hw && pt.x <= cx + hw) {
-            candidates.push({ id: st.StandID, dist: Math.abs(pt.x - cx), stand: st });
-        }
-    }
+    function handleSvgClick(e) {
+        if (!selectedAC) return;
+        const pt = getSvgPt(e);
+        const mode = document.getElementById('place-mode').value;
+        let bestSt = null, snapX = pt.x, snapY = pt.y;
 
-    if (candidates.length > 0) {
-        // เลือกหลุมที่ใกล้จุดศูนย์กลางที่สุด (ป้องกันปัญหาหลุมซ้อน 8, 8L, 8R)
-        const bestCandidate = candidates.sort((a, b) => a.dist - b.dist)[0];
-        const bestSt = bestCandidate.id;
-        const st = bestCandidate.stand;
-        let snapX = pt.x, snapY = pt.y;
-        const cx = xMap[bestSt];
-
-        if (mode === 'snap') {
-            const t1 = HEADER_Y + (12.5 * SCALE), t2 = HEADER_Y + (30 * SCALE);
-            snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
-            snapX = cx;
+        const sorted = [...db.stands].sort((a,b) => (b.ParentID?1:0) - (a.ParentID?1:0));
+        for (let st of sorted) {
+            const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
+            if (pt.x >= cx - hw && pt.x <= cx + hw) {
+                bestSt = st.StandID;
+                if (mode === 'snap') {
+                    const t1 = HEADER_Y + (12.5*SCALE), t2 = HEADER_Y + (30*SCALE);
+                    snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
+                    snapX = cx;
+                }
+                break;
+            }
         }
 
-        const minY = HEADER_Y + (12.5 * SCALE), maxY = HEADER_Y + (st.Length - 12.5) * SCALE;
-        if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
+        if (bestSt) {
+            const st = db.stands.find(s => s.StandID === bestSt);
+            const minY = HEADER_Y + (12.5*SCALE), maxY = HEADER_Y + (st.Length-12.5)*SCALE;
+            if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
 
-        const newAlloc = { 
-            id: Date.now(), standId: bestSt, model: selectedAC.Model, 
-            x: snapX, y: snapY, rotation: currentRotation, turnMode: 0 
-        };
-        allocations.push(newAlloc);
-        activeIdx = allocations.length - 1;
-        cancelSelection();
-        draw();
+            const newAlloc = { 
+                id: Date.now(), standId: bestSt, model: selectedAC.Model, 
+                x: snapX, y: snapY, rotation: currentRotation, turnMode: 0 
+            };
+            allocations.push(newAlloc);
+            activeIdx = allocations.length - 1;
+            cancelSelection();
+            draw();
+            updateAudit(newAlloc, activeIdx);
+        }
     }
-}
 // ฟังก์ชันช่วยตรวจสอบการชนของ Jet Blast
 function checkJetConflict(alloc, idx) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
@@ -396,36 +391,30 @@ function getJetSafetyData(alloc, idx) {
     if (!ac) return { isDanger: false, gap: null };
 
     const jetRange = ac.JetBlast || 0;
-    const tailDist = ac.Length - ac.NoseToPivot; // ระยะจากจุดหมุนถึงท้ายเครื่อง
-    const maxReach = tailDist + jetRange; // รัศมีไอพ่นสูงสุดจากจุดหมุน
+    const tailDist = ac.Length - ac.NoseToPivot;
+    const maxReachFromPivot = tailDist + jetRange;
 
     let minGap = Infinity;
     let targetFound = false;
 
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
-        const acOther = db.aircrafts.find(o => o.Model === other.model);
-
-        // 1. เครื่องลำอื่นอยู่ฝั่งไหนของเครื่องเรา (เทียบกับแกนเครื่องบิน)
-        const sideOfNeighbor = getRelativeSide(alloc, other);
         
-        // 2. กำหนดว่า "ฝั่งไหน" ของเครื่องเราคือฝั่งที่ท้ายเครื่องพ่นลมไป
-        //    - เลี้ยวขวา (0) -> ท้ายเครื่องพ่นไป "ซ้าย" ของเครื่อง (นักบินมองไปทางซ้าย)
-        //    - เลี้ยวซ้าย (1) -> ท้ายเครื่องพ่นไป "ขวา" ของเครื่อง (นักบินมองไปทางขวา)
-        const jetSweptSide = (alloc.turnMode === 0) ? "LEFT" : "RIGHT";
+        const acOther = db.aircrafts.find(o => o.Model === other.model);
+        if (!acOther) return;
 
-        // 3. เช็คว่าเครื่องลำอื่น "อยู่ตรงฝั่งที่ลมพ่นไป" หรือไม่
-        if (sideOfNeighbor === jetSweptSide) {
-            // 4. คำนวณระยะห่างจาก "จุดหมุน" ของเรา ไปยัง "จุดศูนย์กลาง" ของเครื่องลำอื่น
-            const pOff = ac.PivotOffset * SCALE;
-            const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
-            const mlgY = alloc.y + (ac.NoseToPivot * SCALE);
-            
-            const dist = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(mlgY - other.y, 2)) / SCALE;
-            
-            // 5. คำนวณระยะห่างที่เหลือ (Gap)
-            //    Gap = ระยะห่างทั้งหมด - (รัศมีไอพ่นเรา + ครึ่งหนึ่งของความกว้างเครื่องข้างเคียง)
-            const currentGap = dist - (maxReach + acOther.Span / 2);
+        const pOff = ac.PivotOffset * SCALE;
+        // จุดหมุน (Pivot): เลี้ยวขวา(0) ใช้ล้อขวา / เลี้ยวซ้าย(1) ใช้ล้อซ้าย
+        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
+
+        // เช็คฝั่งที่ Jet Blast เหวี่ยงไปจริง:
+        // หัวเลี้ยวขวา (0) -> ท้ายไปซ้าย (เช็คเครื่องที่ X น้อยกว่าเรา)
+        // หัวเลี้ยวซ้าย (1) -> ท้ายไปขวา (เช็คเครื่องที่ X มากกว่าเรา)
+        const isTowardJetSide = (alloc.turnMode === 0 && other.x < alloc.x) || (alloc.turnMode === 1 && other.x > alloc.x);
+        
+        if (isTowardJetSide) {
+            const distBetweenPivotAndNeighborCenter = Math.abs(pivotX - other.x) / SCALE;
+            const currentGap = distBetweenPivotAndNeighborCenter - (maxReachFromPivot + (acOther.Span/2));
             
             if (currentGap < minGap) {
                 minGap = currentGap;
@@ -551,203 +540,106 @@ function checkDynamicJetConflict(alloc, idx) {
         layer.appendChild(txt);
     }
 }
-// ฟังก์ชันหาว่า target อยู่ฝั่งซ้ายหรือขวาของ source (อิงตามการหมุนของ source)
-// ฟังก์ชันที่ถูกต้อง: ตรวจสอบว่า targetAlloc อยู่ฝั่งซ้ายหรือขวาของ sourceAlloc 
-// โดยอิงตามทิศทางการเลี้ยวของ sourceAlloc
-function getRelativeSide(sourceAlloc, targetAlloc) {
-    const ac = db.aircrafts.find(a => a.Model === sourceAlloc.model);
-    const pOff = ac.PivotOffset * SCALE;
-    
-    // 1. หาพิกัดจุดหมุน (Pivot Point) ของเครื่อง sourceAlloc
-    let pivotX, pivotY;
-    if (sourceAlloc.turnMode === 0) { // เลี้ยวขวา (Right Turn) -> หมุนรอบล้อขวา
-        pivotX = sourceAlloc.x + pOff; pivotY = sourceAlloc.y + (ac.NoseToPivot * SCALE);
-    } else { // เลี้ยวซ้าย (Left Turn) -> หมุนรอบล้อซ้าย
-        pivotX = sourceAlloc.x - pOff; pivotY = sourceAlloc.y + (ac.NoseToPivot * SCALE);
+
+    function checkCollision(alloc, idx, margin) {
+        const ac = db.aircrafts.find(a => a.Model === alloc.model);
+        const reach = ac.PivotOffset + ac.SweepRadius + margin;
+        return allocations.some((other, otIdx) => {
+            if (idx === otIdx) return false;
+            const oAc = db.aircrafts.find(a => a.Model === other.model);
+            const dist = Math.abs(alloc.x - other.x) / SCALE;
+            const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
+            return isToward && (reach + oAc.Span/2 > dist);
+        });
     }
-
-    // 2. คำนวณเวกเตอร์จากจุดหมุนไปยังเครื่อง targetAlloc
-    const dx = targetAlloc.x - pivotX;
-    const dy = targetAlloc.y - pivotY;
-
-    // 3. หา "ทิศทาง" ของเครื่อง sourceAlloc (เส้นตรงจากจุดหมุนไปที่หัวเครื่อง)
-    //    (การคำนวณนี้จะซับซ้อนขึ้นเล็กน้อยถ้าต้องการแม่นยำทุกองศา)
-    //    สำหรับตอนนี้ จะใช้การเปรียบเทียบพิกัด X/Y แบบสัมพัทธ์ (relative)
-    //    ที่ใช้ **ร่วมกับ turnMode** เพื่อระบุฝั่งที่ถูกต้อง
-
-    // *** ข้อควรระวัง: Logic นี้ต้องสัมพันธ์กับ drawArc และ drawJetBlastArc ***
-    // *** ซึ่งอาจต้องปรับปรุงให้ใช้ Vector Math ที่ซับซ้อนขึ้นอีกเล็กน้อย ***
-    
-    // **Logic แบบง่ายที่ใช้ได้กับหลายกรณี (ต้องทดสอบอย่างละเอียด):**
-    // หากเลี้ยวขวา (turnMode 0): ฝั่งซ้ายของเครื่อง (นักบิน) คือฝั่งที่จะเกิดการกวาดปีก/ไอพ่น
-    // หากเลี้ยวซ้าย (turnMode 1): ฝั่งขวาของเครื่อง (นักบิน) คือฝั่งที่จะเกิดการกวาดปีก/ไอพ่น
-
-    // วิธีที่ 1: เปรียบเทียบพิกัด X/Y โดยตรง (ง่าย แต่ผิดพลาดเมื่อหมุนมาก)
-    // const sideBasedOnScreen = (dx > 0) ? "RIGHT" : "LEFT"; // นี่คือฝั่งของจอ ไม่ใช่ฝั่งเครื่อง
-
-    // วิธีที่ 2: ใช้การหมุนเวกเตอร์ (ซับซ้อนกว่า แต่แม่นยำ) - *** จะใช้ Logic นี้ ***
-    const angleRad = (sourceAlloc.rotation) * Math.PI / 180;
-    const rx = dx * Math.cos(-angleRad) - dy * Math.sin(-angleRad); // ตำแหน่งสัมพัทธ์ (ซ้าย/ขวาของเครื่อง)
-
-    // ตรวจสอบว่า sideOfNeighbor นั้น "สอดคล้อง" กับทิศทางการเหวี่ยงหรือไม่
-    // เลี้ยวขวา (0) -> ปีกซ้ายเหวี่ยง (นักบินมองไปทางซ้าย)
-    // เลี้ยวซ้าย (1) -> ปีกขวาเหวี่ยง (นักบินมองไปทางขวา)
-    
-    // เราจะส่งค่า "LEFT" หรือ "RIGHT" กลับไปเพื่อให้ฟังก์ชันเรียกใช้ (checkCollision/getJetSafetyData)
-    // เป็นตัวตัดสินว่า "เครื่องที่อยู่ฝั่งนั้น" จะชนหรือไม่
-    return rx > 0 ? "RIGHT" : "LEFT"; // "RIGHT" คือฝั่งขวาของเครื่อง, "LEFT" คือฝั่งซ้ายของเครื่อง
-}
-function checkCollision(alloc, idx, margin) {
-    const ac = db.aircrafts.find(a => a.Model === alloc.model);
-    const reach = ac.PivotOffset + ac.SweepRadius + margin; 
-
-    return allocations.some((other, otIdx) => {
-        if (idx === otIdx) return false;
-        const oAc = db.aircrafts.find(a => a.Model === other.model);
-        
-        // 1. หาว่าเครื่องลำอื่นอยู่ฝั่ง "ไหน" ของเครื่องปัจจุบัน (เทียบกับแกนเครื่องบิน)
-        const sideOfNeighbor = getRelativeSide(alloc, other);
-        
-        // 2. กำหนดว่า "ฝั่งไหน" ของเครื่องเราคือฝั่งที่ปีกกำลังกวาดไป
-        //    - ถ้าเลี้ยวขวา (turnMode 0), ปีก "ซ้าย" ของเครื่องคือฝั่งที่เหวี่ยง
-        //    - ถ้าเลี้ยวซ้าย (turnMode 1), ปีก "ขวา" ของเครื่องคือฝั่งที่เหวี่ยง
-        const sweptSide = (alloc.turnMode === 0) ? "LEFT" : "RIGHT";
-
-        // 3. เช็คว่าเครื่องลำอื่น "อยู่ตรงฝั่งที่ปีกเรากำลังกวาดไป" หรือไม่
-        if (sideOfNeighbor === sweptSide) {
-            // 4. ถ้าอยู่ตรงฝั่งที่กวาด, คำนวณระยะห่างจาก "จุดหมุน" ของเรา
-            //    ไปยัง "จุดศูนย์กลาง" ของเครื่องลำอื่น
-            const pOff = ac.PivotOffset * SCALE;
-            const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
-            const mlgY = alloc.y + (ac.NoseToPivot * SCALE); // ใช้ Y ของจุดหมุน
-            
-            const dist = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(mlgY - other.y, 2)) / SCALE;
-            
-            // 5. ชนเมื่อ: ระยะห่าง < (รัศมีเหวี่ยงปีกเรา + ครึ่งหนึ่งของความกว้างเครื่องลำอื่น)
-            //    (ระยะห่างที่น้อยกว่านี้ หมายถึงมีการชนกัน)
-            return (dist < (reach + oAc.Span / 2));
-        }
-        return false; // ถ้าเครื่องลำอื่นไม่ได้อยู่ฝั่งที่กวาด, ก็ไม่ชน
-    });
-}
 
 function updateAudit(alloc, idx) {
     if (!alloc) return;
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
     const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
     const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
-    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin; // รัศมีปีกรวม
+    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
 
+    // 1. บังคับแสดงพาแนลทุครั้งที่เรียก
     const float = document.getElementById('audit-float');
     float.style.display = 'block';
 
-    // แยกเพื่อนบ้านตามฝั่งของนักบิน (ซ้าย-ขวา)
-    let pilotLeftNeighbors = [];
-    let pilotRightNeighbors = [];
+    // 2. ค้นหาเพื่อนบ้านซ้าย-ขวา
+    let leftN = null, rightN = null;
+    let minL = Infinity, minR = Infinity;
+    
+    // ค้นหาตำแหน่งล้อหลักจุดหมุน (PivotX) เพื่อใช้คำนวณระยะห่าง Jet Blast
+    const pOff = ac.PivotOffset * SCALE;
+    const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
 
     allocations.forEach((other) => {
         if (other.id === alloc.id) return;
-        
-        const side = getRelativeSide(alloc, other); // ใช้ฟังก์ชันใหม่
-        const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
-        
-        const neighborInfo = { 
-            data: other, 
-            dist: dist,
-            acData: db.aircrafts.find(a => a.Model === other.model)
-        };
-
-        if (side === "LEFT") pilotLeftNeighbors.push(neighborInfo);
-        else pilotRightNeighbors.push(neighborInfo);
+        const d = Math.abs(alloc.x - other.x) / SCALE;
+        if (other.x < alloc.x && d < minL) { minL = d; leftN = other; }
+        if (other.x > alloc.x && d < minR) { minR = d; rightN = other; }
     });
-
-    // เรียงลำดับเพื่อนบ้านที่ใกล้ที่สุดขึ้นก่อน
-    pilotLeftNeighbors.sort((a, b) => a.dist - b.dist);
-    pilotRightNeighbors.sort((a, b) => a.dist - b.dist);
 
     let auditHTML = `
         <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:15px;">
             <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
-            <b>รุ่น:</b> ${ac.Model} (Type ${ac.Code}) | <b>นักบินเลี้ยว:</b> ${alloc.turnMode === 0 ? 'ขวา ➡️' : 'ซ้าย ⬅️'}
+            <b>รุ่น:</b> ${ac.Model} (Type ${ac.Code}) | <b>หัวเครื่องเลี้ยว:</b> ${alloc.turnMode === 0 ? 'ขวา ➡️' : 'ซ้าย ⬅️'}
         </div>
 
         <div class="audit-card">
-            <b>1. รัศมีกวาดปีก (Wing Sweep):</b>
+            <b>1. การคำนวณรัศมีกวาดปีก (Wing Sweep):</b>
             <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
             <b style="color:var(--accent);">ระยะเหวี่ยงปีกสุทธิ = ${totalReach.toFixed(2)} เมตร</b>
         </div>
     `;
 
-    // ฟังก์ชันช่วยสร้าง HTML สำหรับเพื่อนบ้านแต่ละฝั่ง (มุมมองนักบิน)
-    const getNeighborHTML = (neighbors, sideLabel) => {
-        if (neighbors.length === 0) return `<p style="color:#888; font-size:0.9em;">- ไม่พบอากาศยานฝั่ง${sideLabel}ของนักบิน</p>`;
+    // ฟังก์ชันช่วยสร้าง HTML สำหรับเพื่อนบ้าน (คงเดิมตามที่คุณต้องการ)
+    const getNeighborHTML = (neighbor, sideDist, label) => {
+        if (!neighbor) return `<p style="color:#888; font-size:0.9em;">- ไม่พบอากาศยานฝั่ง${label}</p>`;
+        const otAc = db.aircrafts.find(a => a.Model === neighbor.model);
+        const neighborHalfSpan = otAc.Span / 2;
         
-        return neighbors.map(n => {
-            const otAc = n.acData;
-            const neighborHalfSpan = otAc.Span / 2;
-            
-            // ระยะห่างขณะจอดนิ่ง (Static)
-            const staticGap = n.dist - (ac.Span / 2 + neighborHalfSpan);
-            
-            // ตรรกะการเหวี่ยงปีก: เลี้ยวขวา(0) เหวี่ยงไปซ้ายนักบิน | เลี้ยวซ้าย(1) เหวี่ยงไปขวานักบิน
-            const sweptSide = (alloc.turnMode === 0) ? "ซ้าย" : "ขวา"; // ฝั่งที่ปีกจะกวาดไป (มองจากนักบิน)
-            const isToward = (sideLabel === sweptSide); // เครื่องอยู่ตรงฝั่งที่ปีกจะกวาดไปหรือไม่
-            
-            let html = `<div style="margin-bottom:12px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px;">`;
-            html += `<b>ฝั่ง${sideLabel} (${n.data.standId}):</b> ${otAc.Model}<br>`;
-            html += `ระยะจอดนิ่ง (Static Gap): <b style="color:${staticGap < rule.MinClearance ? 'red' : 'lime'}">${staticGap.toFixed(2)}m</b> (Req ${rule.MinClearance}m)<br>`;
-            
-            if (isToward) {
-                // ระยะห่างขณะเลี้ยว (Dynamic) วัดจากจุดหมุน
-                const dynamicGap = n.dist - (totalReach + neighborHalfSpan);
-                html += `<div style="margin-top:5px; border-top: 1px solid #444; padding-top:5px;">`;
-                html += `<span style="color:var(--accent); font-size:0.85em;">⚠️ อยู่ในแนวเหวี่ยงปีกนักบิน</span><br>`;
-                html += `<span class="formula" style="font-size:0.8em;">คำนวณ: ${n.dist.toFixed(2)}m (ระยะห่าง) - (${totalReach.toFixed(2)}m (รัศมี) + ${neighborHalfSpan.toFixed(2)}m (ปีกข้าง))</span>`;
-                html += `ระยะปลอดภัยสุทธิ: <b style="color:${dynamicGap < 0 ? 'red' : 'lime'}">${dynamicGap.toFixed(2)}m</b>`;
-                html += `</div>`;
-            } else {
-                html += `<span style="color:#888; font-size:0.85em;">(ไม่อยู่ในแนวเหวี่ยงปีกจากการเลี้ยวนี้)</span>`;
-            }
-            html += `</div>`;
-            return html;
-        }).join('');
+        const staticGap = sideDist - (ac.Span / 2 + neighborHalfSpan);
+        const isToward = (alloc.turnMode === 0 && label === 'ขวา') || (alloc.turnMode === 1 && label === 'ซ้าย');
+        
+        let html = `<div style="margin-bottom:8px;"><b>ฝั่ง${label} (${neighbor.standId}):</b> ${neighbor.model}<br>`;
+        html += `จอดนิ่ง (Static): <b style="color:${staticGap < rule.MinClearance ? 'red' : 'lime'}">${staticGap.toFixed(2)}m</b> (Req ${rule.MinClearance}m)<br>`;
+        
+        if (isToward) {
+            const dynamicGap = sideDist - (totalReach + neighborHalfSpan);
+            html += `<span class="formula" style="font-size:0.8em;">คำนวณ: ${sideDist.toFixed(2)} - (${totalReach.toFixed(2)} + ${neighborHalfSpan.toFixed(2)})</span>`;
+            html += `ขณะเลี้ยว (Dynamic): <b style="color:${dynamicGap < 0 ? 'red' : 'lime'}">${dynamicGap.toFixed(2)}m</b>`;
+        }
+        return html + `</div>`;
     };
 
-    auditHTML += `
-        <div class="audit-card">
-            <b>2. ตรวจสอบ Clearance รอบข้าง (มุมมองนักบิน):</b>
-            <div style="margin-top:10px;">
-                ${getNeighborHTML(pilotLeftNeighbors, 'ซ้าย')}
-                ${getNeighborHTML(pilotRightNeighbors, 'ขวา')}
-            </div>
-        </div>
-    `;
+    auditHTML += `<div class="audit-card"><b>2. ตรวจสอบ Clearance รอบข้าง:</b>${getNeighborHTML(leftN, minL, 'ซ้าย')}${getNeighborHTML(rightN, minR, 'ขวา')}</div>`;
 
-    // 3. ตรวจสอบ Jet Blast (ใช้ Logic ใหม่)
+    // 3. ตรวจสอบ Jet Blast (แก้ไขทิศทางและสูตรคำนวณตามหลักการ)
     if (ac.JetBlast) {
         const jetStatus = getJetSafetyData(alloc, idx); 
-        const tailSwingSide = alloc.turnMode === 0 ? "ซ้าย ⬅️" : "ขวา ➡️"; // ทิศทางลมพ่น (เทียบกับนักบิน)
-        const tailDist = ac.Length - ac.NoseToPivot; 
-        const maxBlastReach = tailDist + ac.JetBlast;
+        // Logic: หัวเลี้ยวขวา(0) -> ท้ายเหวี่ยงไปซ้าย | หัวเลี้ยวซ้าย(1) -> ท้ายเหวี่ยงไปขวา
+        const tailSwingSide = alloc.turnMode === 0 ? "ซ้าย ⬅️" : "ขวา ➡️";
+        const tailDist = ac.Length - ac.NoseToPivot; // ระยะหางเหวี่ยง (24.93 สำหรับ A320)
+        const maxBlastReach = tailDist + ac.JetBlast; // รัศมีลมพ่นรวม
 
         auditHTML += `
             <div class="audit-card" style="border-left-color: ${jetStatus.isDanger ? 'red' : '#2ecc71'}">
                 <b>3. ตรวจสอบ Jet Blast (แรงลมท้ายเครื่อง):</b><br>
-                ทิศทางเหวี่ยงท้ายเครื่อง: <b style="color:var(--accent);">${tailSwingSide} ของนักบิน</b><br>
-                <span style="font-size:0.85em; color:#bbb;">(สูตร: ท้ายเครื่อง ${tailDist.toFixed(2)}m + แรงลม ${ac.JetBlast}m)</span><br>
-                <span class="formula">รัศมีลมพ่นสูงสุด: ${maxBlastReach.toFixed(2)} เมตร</span>
+                ทิศทางเหวี่ยงท้ายเครื่อง: <b style="color:var(--accent);">${tailSwingSide}</b><br>
+                <span style="font-size:0.85em; color:#bbb;">(สูตร: ความยาว ${ac.Length}m - ฐานล้อ ${ac.NoseToPivot}m = ระยะท้ายเครื่อง ${tailDist.toFixed(2)}m)</span><br>
+                <span class="formula">รัศมีลมพ่นสูงสุด (จากจุดหมุน): ${tailDist.toFixed(2)}m (ท้าย) + ${ac.JetBlast}m (ลม) = ${maxBlastReach.toFixed(2)}m</span>
                 
                 ${jetStatus.gap !== null ? 
-                    `<span class="formula">คำนวณ: [ระยะห่าง] - [รัศมีลมพ่น + ครึ่งปีกข้างเคียง]</span>
+                    `<span class="formula">คำนวณ: [ระยะจุดหมุนถึงลำข้างๆ] - [รัศมีลมพ่นสูงสุด + ครึ่งปีกข้างเคียง]</span>
                      <b style="color:${jetStatus.isDanger ? 'red' : 'lime'}; font-size:1.1em;">
-                        คงเหลือระยะปลอดภัยลมพ่น: ${jetStatus.gap.toFixed(2)} เมตร
+                        คงเหลือระยะปลอดภัยสุทธิ: ${jetStatus.gap.toFixed(2)} เมตร
                      </b>` 
                     : `<i style="color:#aaa;">- ไม่พบอากาศยานในแนวเหวี่ยงของลม -</i>`
                 }
 
                 <div class="res-box" style="background:${jetStatus.isDanger ? 'rgba(231,76,60,0.2)' : 'rgba(46,204,113,0.2)'}; 
                                            color:${jetStatus.isDanger ? 'red' : '#2ecc71'}; 
-                                           border-color:${jetStatus.isDanger ? 'red' : '#2ecc71'}; font-size:1rem; padding:8px; margin-top:10px; border-radius:4px; border: 1px solid;">
+                                           border-color:${jetStatus.isDanger ? 'red' : '#2ecc71'}; font-size:1rem; padding:8px; margin-top:10px;">
                     สถานะ Jet Blast: ${jetStatus.isDanger ? '❌ อันตราย! ลมเป่าลำข้างเคียง' : '✅ ระยะลมกวาดปลอดภัย'}
                 </div>
             </div>
