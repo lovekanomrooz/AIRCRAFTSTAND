@@ -184,42 +184,47 @@
         return pt.matrixTransform(svg.getScreenCTM().inverse());
     }
 
-    function handleSvgClick(e) {
-        if (!selectedAC) return;
-        const pt = getSvgPt(e);
-        const mode = document.getElementById('place-mode').value;
-        let bestSt = null, snapX = pt.x, snapY = pt.y;
-
-        const sorted = [...db.stands].sort((a,b) => (b.ParentID?1:0) - (a.ParentID?1:0));
-        for (let st of sorted) {
-            const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
-            if (pt.x >= cx - hw && pt.x <= cx + hw) {
-                bestSt = st.StandID;
-                if (mode === 'snap') {
-                    const t1 = HEADER_Y + (12.5*SCALE), t2 = HEADER_Y + (30*SCALE);
-                    snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
-                    snapX = cx;
-                }
-                break;
-            }
-        }
-
-        if (bestSt) {
-            const st = db.stands.find(s => s.StandID === bestSt);
-            const minY = HEADER_Y + (12.5*SCALE), maxY = HEADER_Y + (st.Length-12.5)*SCALE;
-            if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
-
-            const newAlloc = { 
-                id: Date.now(), standId: bestSt, model: selectedAC.Model, 
-                x: snapX, y: snapY, rotation: currentRotation, turnMode: 0 
-            };
-            allocations.push(newAlloc);
-            activeIdx = allocations.length - 1;
-            cancelSelection();
-            draw();
-            updateAudit(newAlloc, activeIdx);
+  function handleSvgClick(e) {
+    if (!selectedAC) return;
+    const pt = getSvgPt(e);
+    const mode = document.getElementById('place-mode').value;
+    
+    // ค้นหาหลุมที่จุดคลิกอยู่ภายในขอบเขต และเลือกหลุมที่คลิกใกล้จุดศูนย์กลางที่สุด
+    let candidates = [];
+    for (let st of db.stands) {
+        const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
+        if (pt.x >= cx - hw && pt.x <= cx + hw) {
+            candidates.push({ id: st.StandID, dist: Math.abs(pt.x - cx), stand: st });
         }
     }
+
+    if (candidates.length > 0) {
+        // เลือกหลุมที่ใกล้จุดศูนย์กลางที่สุด (ป้องกันปัญหาหลุมซ้อน 8, 8L, 8R)
+        const bestCandidate = candidates.sort((a, b) => a.dist - b.dist)[0];
+        const bestSt = bestCandidate.id;
+        const st = bestCandidate.stand;
+        let snapX = pt.x, snapY = pt.y;
+        const cx = xMap[bestSt];
+
+        if (mode === 'snap') {
+            const t1 = HEADER_Y + (12.5 * SCALE), t2 = HEADER_Y + (30 * SCALE);
+            snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
+            snapX = cx;
+        }
+
+        const minY = HEADER_Y + (12.5 * SCALE), maxY = HEADER_Y + (st.Length - 12.5) * SCALE;
+        if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
+
+        const newAlloc = { 
+            id: Date.now(), standId: bestSt, model: selectedAC.Model, 
+            x: snapX, y: snapY, rotation: currentRotation, turnMode: 0 
+        };
+        allocations.push(newAlloc);
+        activeIdx = allocations.length - 1;
+        cancelSelection();
+        draw();
+    }
+}
 // ฟังก์ชันช่วยตรวจสอบการชนของ Jet Blast
 function checkJetConflict(alloc, idx) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
