@@ -397,30 +397,22 @@ function getJetSafetyData(alloc, idx) {
 
     const jetRange = ac.JetBlast || 0;
     const tailDist = ac.Length - ac.NoseToPivot;
-    const maxReachFromPivot = tailDist + jetRange;
+    const maxReach = tailDist + jetRange;
 
     let minGap = Infinity;
     let targetFound = false;
 
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
-        
         const acOther = db.aircrafts.find(o => o.Model === other.model);
-        if (!acOther) return;
 
-        const pOff = ac.PivotOffset * SCALE;
-        // จุดหมุน (Pivot): เลี้ยวขวา(0) ใช้ล้อขวา / เลี้ยวซ้าย(1) ใช้ล้อซ้าย
-        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
+        const side = getRelativeSide(alloc, other);
+        // เลี้ยวขวา (0) -> ท้ายเหวี่ยงซ้าย | เลี้ยวซ้าย (1) -> ท้ายเหวี่ยงขวา
+        const jetSweptSide = (alloc.turnMode === 0) ? "LEFT" : "RIGHT";
 
-        // เช็คฝั่งที่ Jet Blast เหวี่ยงไปจริง:
-        // หัวเลี้ยวขวา (0) -> ท้ายไปซ้าย (เช็คเครื่องที่ X น้อยกว่าเรา)
-        // หัวเลี้ยวซ้าย (1) -> ท้ายไปขวา (เช็คเครื่องที่ X มากกว่าเรา)
-        const isTowardJetSide = (alloc.turnMode === 0 && other.x < alloc.x) || (alloc.turnMode === 1 && other.x > alloc.x);
-        
-        if (isTowardJetSide) {
-            const distBetweenPivotAndNeighborCenter = Math.abs(pivotX - other.x) / SCALE;
-            const currentGap = distBetweenPivotAndNeighborCenter - (maxReachFromPivot + (acOther.Span/2));
-            
+        if (side === jetSweptSide) {
+            const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
+            const currentGap = dist - (maxReach + acOther.Span/2);
             if (currentGap < minGap) {
                 minGap = currentGap;
                 targetFound = true;
@@ -545,18 +537,38 @@ function checkDynamicJetConflict(alloc, idx) {
         layer.appendChild(txt);
     }
 }
+function getRelativeSide(sourceAlloc, targetAlloc) {
+    // คำนวณความต่างพิกัด
+    const dx = targetAlloc.x - sourceAlloc.x;
+    const dy = targetAlloc.y - sourceAlloc.y;
+    
+    // แปลงมุมเป็นเรเดียน
+    const rad = (sourceAlloc.rotation) * Math.PI / 180;
+    
+    // หมุนเวกเตอร์กลับตามองศาของเครื่อง (Inverse Rotation)
+    // ผลลัพธ์ที่ได้: rx > 0 คืออยู่ขวาของเครื่อง, rx < 0 คืออยู่ซ้ายของเครื่อง
+    const rx = dx * Math.cos(-rad) - dy * Math.sin(-rad);
+    return rx > 0 ? "RIGHT" : "LEFT";
+}
+   function checkCollision(alloc, idx, margin) {
+    const ac = db.aircrafts.find(a => a.Model === alloc.model);
+    const reach = ac.PivotOffset + ac.SweepRadius + margin;
 
-    function checkCollision(alloc, idx, margin) {
-        const ac = db.aircrafts.find(a => a.Model === alloc.model);
-        const reach = ac.PivotOffset + ac.SweepRadius + margin;
-        return allocations.some((other, otIdx) => {
-            if (idx === otIdx) return false;
-            const oAc = db.aircrafts.find(a => a.Model === other.model);
-            const dist = Math.abs(alloc.x - other.x) / SCALE;
-            const isToward = (alloc.turnMode === 0 && other.x > alloc.x) || (alloc.turnMode === 1 && other.x < alloc.x);
-            return isToward && (reach + oAc.Span/2 > dist);
-        });
-    }
+    return allocations.some((other, otIdx) => {
+        if (idx === otIdx) return false;
+        const oAc = db.aircrafts.find(a => a.Model === other.model);
+        
+        const side = getRelativeSide(alloc, other);
+        // เลี้ยวขวา (0) -> ปีกซ้ายเหวี่ยง | เลี้ยวซ้าย (1) -> ปีกขวาเหวี่ยง
+        const sweptSide = (alloc.turnMode === 0) ? "LEFT" : "RIGHT";
+        
+        if (side === sweptSide) {
+            const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
+            return (reach + oAc.Span/2 > dist);
+        }
+        return false;
+    });
+}
 
 function updateAudit(alloc, idx) {
     if (!alloc) return;
