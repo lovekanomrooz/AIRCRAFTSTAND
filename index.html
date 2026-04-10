@@ -566,18 +566,30 @@ function checkCollision(alloc, idx, margin) {
         if (idx === otIdx) return false;
         const oAc = db.aircrafts.find(a => a.Model === other.model);
         
-        // เครื่องลำอื่นอยู่ฝั่งไหนของนักบิน?
         const sideOfNeighbor = getRelativeSide(alloc, other);
         
-        // *** Logic การเหวี่ยงปีก (ตามหลักการบินจริง) ***
-        // เลี้ยวขวา (turnMode 0) -> ปีกซ้าย (Outer Wing) จะเหวี่ยงแรงที่สุด
-        // เลี้ยวซ้าย (turnMode 1) -> ปีกขวา (Outer Wing) จะเหวี่ยงแรงที่สุด
-        const sweptSide = (alloc.turnMode === 0) ? "LEFT" : "RIGHT";
+        // --- แก้ไข Logic ตรงนี้ให้ตรงตามที่คุณสรุป ---
+        // เลี้ยวขวา (0) -> ปีกซ้ายเหวี่ยง -> ต้องเช็คเครื่องที่อยู่ฝั่ง "ซ้าย" ของนักบิน (แต่เหวี่ยงมาหาเรา)
+        // หรือพูดง่ายๆ คือ ถ้าเราเลี้ยวเข้าหาเครื่องลำไหน ลำนั้นคืออันตราย
+        
+        // ในกรณีของคุณ: หลุม 5 เลี้ยวขวา (ปีกซ้ายเหวี่ยงตามเข็ม) 
+        // พื้นที่อันตรายจะครอบคลุมตั้งแต่ "ซ้ายนักบิน" ไปจนถึง "หน้านักบิน"
+        
+        // เพื่อให้แม่นยำที่สุด เราจะเช็คว่าเครื่องลำอื่นอยู่ในรัศมีเหวี่ยง (reach) หรือไม่
+        const pOff = ac.PivotOffset * SCALE;
+        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
+        const mlgY = alloc.y + (ac.NoseToPivot * SCALE);
+        const dist = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(mlgY - other.y, 2)) / SCALE;
 
-        if (sideOfNeighbor === sweptSide) {
-            // วัดระยะจากจุดศูนย์กลาง (หรือจุดหมุน) ไปยังเครื่องข้างๆ
-            const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
-            return (dist < (reach + oAc.Span / 2));
+        // ถ้าเครื่องลำอื่น อยู่ในระยะที่รัศมีกวาดไปถึง
+        if (dist < (reach + oAc.Span / 2)) {
+            // เช็คว่าอยู่ "ฝั่ง" ที่จะโดนกวาดใส่หรือไม่
+            // เลี้ยวขวา (0) -> เหวี่ยงจากซ้ายไปหน้า (เช็คเครื่องที่อยู่ค่อนไปทางซ้าย/หน้า)
+            // เลี้ยวซ้าย (1) -> เหวี่ยงจากขวาไปหน้า (เช็คเครื่องที่อยู่ค่อนไปทางขวา/หน้า)
+            const dangerSide = (alloc.turnMode === 0) ? "LEFT" : "RIGHT";
+            
+            // ถ้าเครื่องบินลำนั้นอยู่ฝั่งที่เป็นอันตราย (เช่น อยู่ทางซ้ายขณะเรากำลังจะเลี้ยวขวา)
+            if (sideOfNeighbor === dangerSide) return true;
         }
         return false;
     });
@@ -622,7 +634,7 @@ function updateAudit(alloc, idx) {
         const staticGap = neighbor.d - (ac.Span/2 + oAc.Span/2);
         
         // ปีกเหวี่ยงโดนฝั่งนี้หรือไม่?
-        const sweptSide = (alloc.turnMode === 0) ? "ซ้าย" : "ขวา";
+        const sweptSide = (alloc.turnMode === 0) ? "ซ้าย" : "ขวา"; 
         const isToward = (label === sweptSide);
         const dynamicGap = neighbor.d - (totalReach + oAc.Span/2);
 
