@@ -421,62 +421,67 @@ function getMinSeparation(allocA, allocB) {
 // แก้ไขฟังก์ชันวาด Jet Blast ให้เหวี่ยงสลับข้างกับการเลี้ยว
 // แก้ไขฟังก์ชันวาด Jet Blast ให้เริ่มต้นจากท้ายเครื่อง
 function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
-    const jetRange = (ac.JetBlast || 0) * SCALE; // ระยะพ่นลม (เมตร * SCALE)
-    const tailDist = (ac.Length - ac.NoseToPivot) * SCALE; // ระยะจากจุดหมุนไปท้ายเครื่อง
+    const jetRange = (ac.JetBlast || 0) * SCALE;
     
-    // รัศมีวงใน (เริ่มที่ท้ายเครื่อง) และ รัศมีวงนอก (สุดระยะลมพ่น)
-    const innerR = tailDist; 
-    const outerR = tailDist + jetRange;
+    // 1. คำนวณระยะทางจาก "แนวแกนล้อ" ไปยัง "ท้ายเครื่อง"
+    const dy = (ac.Length - ac.NoseToPivot); // ระยะแนวดิ่งจากจุดหมุนถึงท้าย
+    const dx = ac.PivotOffset;              // ระยะแนวราบจากจุดหมุนถึงเส้นกลางเครื่อง
     
-    // มุมหัวเครื่อง (Radian)
-    const baseRad = (rot - 90) * Math.PI / 180;
-    // ทิศทางจากจุดหมุนไปยังท้ายเครื่อง (ตรงข้ามหัวเครื่อง 180 องศา)
-    const tailAngleStart = baseRad + Math.PI;
+    // 2. รัศมีจริงจากจุดหมุน (ล้อ) ไปถึงท้ายเครื่อง (ใช้สูตรตรีโกณมิติ)
+    // นี่คือรัศมีวงในที่ถูกต้อง ไม่ว่าเครื่องจะหมุนกี่องศา
+    const innerR = Math.sqrt(dx * dx + dy * dy) * SCALE;
+    const outerR = innerR + jetRange;
+    
+    // 3. หามุมเบี่ยงเบน (Angular Offset) ของท้ายเครื่องที่กระทำต่อจุดหมุน
+    const angleOffset = Math.atan2(dx, dy); 
 
-    // ระยะการกวาด (Sweep) ปกติคือ 90 องศาขณะเลี้ยว
-    const angleDiff = Math.PI / 2; 
-    let tailAngleEnd, sweepFlag;
+    // 4. หามุมทิศทางด้านหลังเครื่อง (Base Back Angle) ในพิกัด SVG
+    // (rot - 90) คือทิศหัวเครื่อง, ดังนั้น (rot + 90) คือทิศท้ายเครื่อง
+    const baseBackRad = (rot + 90) * Math.PI / 180;
+
+    let tailAngleStart, tailAngleEnd, sweepFlag;
 
     if (isNoseRight) {
-        // เลี้ยวขวา -> ท้ายเหวี่ยงไปซ้าย (บวกมุมเพิ่ม)
-        tailAngleEnd = tailAngleStart + angleDiff; 
-        sweepFlag = 1; 
+        // --- เลี้ยวขวา (หมุนรอบล้อขวา) ---
+        // ท้ายเครื่องจะอยู่ทาง "ซ้าย" ของจุดหมุนเสมอ (ลบค่า offset ออกจากมุมพื้นฐาน)
+        tailAngleStart = baseBackRad - angleOffset;
+        tailAngleEnd = tailAngleStart + (Math.PI / 2); // กวาดไป 90 องศา
+        sweepFlag = 1;
     } else {
-        // เลี้ยวซ้าย -> ท้ายเหวี่ยงไปขวา (ลบมุมออก)
-        tailAngleEnd = tailAngleStart - angleDiff;
+        // --- เลี้ยวซ้าย (หมุนรอบล้อซ้าย) ---
+        // ท้ายเครื่องจะอยู่ทาง "ขวา" ของจุดหมุนเสมอ (บวกค่า offset เข้ากับมุมพื้นฐาน)
+        tailAngleStart = baseBackRad + angleOffset;
+        tailAngleEnd = tailAngleStart - (Math.PI / 2); // กวาดทวนเข็ม 90 องศา
         sweepFlag = 0;
     }
 
-    // ฟังก์ชันคำนวณพิกัดจากรัศมีและมุม
     const getPt = (r, ang) => ({
         x: px + Math.cos(ang) * r,
         y: py + Math.sin(ang) * r
     });
 
-    // จุดพิกัด 4 จุดเพื่อสร้างรูปทรงพื้นที่พ่นลม
-    const p1_inner = getPt(innerR, tailAngleStart); // จุดเริ่มพ่นที่ท้ายเครื่อง (จุดเริ่มเลี้ยว)
-    const p2_inner = getPt(innerR, tailAngleEnd);   // จุดเริ่มพ่นที่ท้ายเครื่อง (จุดจบเลี้ยว)
-    const p1_outer = getPt(outerR, tailAngleStart); // จุดปลายลมพ่น (จุดเริ่มเลี้ยว)
-    const p2_outer = getPt(outerR, tailAngleEnd);   // จุดปลายลมพ่น (จุดจบเลี้ยว)
+    const p1i = getPt(innerR, tailAngleStart);
+    const p2i = getPt(innerR, tailAngleEnd);
+    const p1o = getPt(outerR, tailAngleStart);
+    const p2o = getPt(outerR, tailAngleEnd);
 
-    // วาด Path เป็นรูปพัด (Annular Sector)
-    // เริ่มที่ท้ายเครื่อง -> กวาดตามแนวเลี้ยว -> ลากไปปลายลม -> กวาดกลับ -> ปิดที่จุดเริ่ม
+    // วาดรูปทรงพื้นที่ไอพ่น (Annular Sector)
     const d = `
-        M ${p1_inner.x} ${p1_inner.y} 
-        A ${innerR} ${innerR} 0 0 ${sweepFlag} ${p2_inner.x} ${p2_inner.y}
-        L ${p2_outer.x} ${p2_outer.y}
-        A ${outerR} ${outerR} 0 0 ${1 - sweepFlag} ${p1_outer.x} ${p1_outer.y}
+        M ${p1i.x} ${p1i.y} 
+        A ${innerR} ${innerR} 0 0 ${sweepFlag} ${p2i.x} ${p2i.y}
+        L ${p2o.x} ${p2o.y}
+        A ${outerR} ${outerR} 0 0 ${1 - sweepFlag} ${p1o.x} ${p1o.y}
         Z
     `;
 
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
     
-    // สีแดงถ้าอันตราย, สีส้มจางถ้าปลอดภัย
-    const fillColor = isDanger ? 'rgba(231, 76, 60, 0.4)' : 'url(#jetblastGradient)';
-    const strokeColor = isDanger ? '#e74c3c' : 'orange';
+    // ตั้งค่าสีเขียวตามที่คุณต้องการ
+    const color = isDanger ? 'rgba(231, 76, 60, 0.5)' : 'rgba(46, 204, 113, 0.3)';
+    const stroke = isDanger ? '#e74c3c' : '#2ecc71';
     
-    p.setAttribute("style", `fill: ${fillColor}; stroke: ${strokeColor}; stroke-width: 1; stroke-dasharray: 4; pointer-events: none; opacity: 0.6;`);
+    p.setAttribute("style", `fill: ${color}; stroke: ${stroke}; stroke-width: 1.5; stroke-dasharray: 4; pointer-events: none;`);
     layer.appendChild(p);
 }
 
