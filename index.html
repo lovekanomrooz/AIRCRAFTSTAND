@@ -184,42 +184,57 @@
         return pt.matrixTransform(svg.getScreenCTM().inverse());
     }
 
-    function handleSvgClick(e) {
-        if (!selectedAC) return;
-        const pt = getSvgPt(e);
-        const mode = document.getElementById('place-mode').value;
-        let bestSt = null, snapX = pt.x, snapY = pt.y;
-
-        const sorted = [...db.stands].sort((a,b) => (b.ParentID?1:0) - (a.ParentID?1:0));
-        for (let st of sorted) {
-            const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
-            if (pt.x >= cx - hw && pt.x <= cx + hw) {
-                bestSt = st.StandID;
-                if (mode === 'snap') {
-                    const t1 = HEADER_Y + (12.5*SCALE), t2 = HEADER_Y + (30*SCALE);
-                    snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
-                    snapX = cx;
-                }
-                break;
-            }
-        }
-
-        if (bestSt) {
-            const st = db.stands.find(s => s.StandID === bestSt);
-            const minY = HEADER_Y + (12.5*SCALE), maxY = HEADER_Y + (st.Length-12.5)*SCALE;
-            if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
-
-            const newAlloc = { 
-                id: Date.now(), standId: bestSt, model: selectedAC.Model, 
-                x: snapX, y: snapY, rotation: currentRotation, turnMode: 0 
-            };
-            allocations.push(newAlloc);
-            activeIdx = allocations.length - 1;
-            cancelSelection();
-            draw();
-            updateAudit(newAlloc, activeIdx);
+  function handleSvgClick(e) {
+    if (!selectedAC) return;
+    const pt = getSvgPt(e);
+    const mode = document.getElementById('place-mode').value;
+    
+    // ค้นหาหลุมที่จุดคลิกอยู่ภายในขอบเขต และเลือกหลุมที่คลิกใกล้จุดศูนย์กลางที่สุด
+    let candidates = [];
+    for (let st of db.stands) {
+        const cx = xMap[st.StandID], hw = (st.Width * SCALE) / 2;
+        if (pt.x >= cx - hw && pt.x <= cx + hw) {
+            candidates.push({ id: st.StandID, dist: Math.abs(pt.x - cx), stand: st });
         }
     }
+
+    if (candidates.length > 0) {
+        // เลือกหลุมที่ใกล้จุดศูนย์กลางที่สุด (ป้องกันปัญหาหลุมซ้อน 8, 8L, 8R)
+        const bestCandidate = candidates.sort((a, b) => a.dist - b.dist)[0];
+        const bestSt = bestCandidate.id;
+        const st = bestCandidate.stand;
+        let snapX = pt.x, snapY = pt.y;
+        const cx = xMap[bestSt];
+
+        if (mode === 'snap') {
+            const t1 = HEADER_Y + (12.5 * SCALE), t2 = HEADER_Y + (30 * SCALE);
+            snapY = Math.abs(pt.y - t1) < Math.abs(pt.y - t2) ? t1 : t2;
+            snapX = cx;
+        }
+
+        const minY = HEADER_Y + (12.5 * SCALE), maxY = HEADER_Y + (st.Length - 12.5) * SCALE;
+        if (snapY < minY || snapY > maxY) { alert("อยู่นอกเขตปลอดภัย (12.5ม.)"); return; }
+
+        const newAlloc = { 
+            id: Date.now(), standId: bestSt, model: selectedAC.Model, 
+            x: snapX, y: snapY, rotation: currentRotation, turnMode: 0 
+        };
+        allocations.push(newAlloc);
+        activeIdx = allocations.length - 1;
+        cancelSelection();
+        draw();
+    }
+}
+// ฟังก์ชันหาว่าจุดเป้าหมาย อยู่ทาง "ซ้าย" หรือ "ขวา" ของเครื่องบิน (อิงตามการหมุน)
+function getRelativeSide(subject, target) {
+    // แปลงมุมเป็นเรเดียนและหาความต่างตำแหน่ง
+    const rad = -subject.rotation * Math.PI / 180;
+    const dx = target.x - subject.x;
+    const dy = target.y - subject.y;
+    // หมุนแกนพิกัด (Rotation Matrix) เพื่อหาค่า X ในมุมมองของเครื่องบิน
+    const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+    return localX > 0 ? "Right" : "Left";
+}
 // ฟังก์ชันช่วยตรวจสอบการชนของ Jet Blast
 function checkJetConflict(alloc, idx) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
@@ -388,34 +403,30 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
 
 function getJetSafetyData(alloc, idx) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
-    if (!ac) return { isDanger: false, gap: null };
+    if (!ac || !ac.JetBlast) return { isDanger: false, gap: null, side: null };
 
-    const jetRange = ac.JetBlast || 0;
     const tailDist = ac.Length - ac.NoseToPivot;
-    const maxReachFromPivot = tailDist + jetRange;
-
+    const maxSafeR = tailDist + ac.JetBlast;
     let minGap = Infinity;
     let targetFound = false;
 
+    // หาจุดหมุน (Pivot)
+    const pOff = ac.PivotOffset * SCALE;
+    const rad = (alloc.rotation - 90) * Math.PI / 180;
+    const pivotX = alloc.x + Math.cos(rad + (alloc.turnMode === 0 ? Math.PI/2 : -Math.PI/2)) * pOff;
+    const pivotY = alloc.y + Math.sin(rad + (alloc.turnMode === 0 ? Math.PI/2 : -Math.PI/2)) * pOff;
+
     allocations.forEach((other, otIdx) => {
         if (idx === otIdx) return;
-        
         const acOther = db.aircrafts.find(o => o.Model === other.model);
-        if (!acOther) return;
-
-        const pOff = ac.PivotOffset * SCALE;
-        // จุดหมุน (Pivot): เลี้ยวขวา(0) ใช้ล้อขวา / เลี้ยวซ้าย(1) ใช้ล้อซ้าย
-        const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
-
-        // เช็คฝั่งที่ Jet Blast เหวี่ยงไปจริง:
-        // หัวเลี้ยวขวา (0) -> ท้ายไปซ้าย (เช็คเครื่องที่ X น้อยกว่าเรา)
-        // หัวเลี้ยวซ้าย (1) -> ท้ายไปขวา (เช็คเครื่องที่ X มากกว่าเรา)
-        const isTowardJetSide = (alloc.turnMode === 0 && other.x < alloc.x) || (alloc.turnMode === 1 && other.x > alloc.x);
         
-        if (isTowardJetSide) {
-            const distBetweenPivotAndNeighborCenter = Math.abs(pivotX - other.x) / SCALE;
-            const currentGap = distBetweenPivotAndNeighborCenter - (maxReachFromPivot + (acOther.Span/2));
-            
+        // ตรวจสอบว่าเครื่องลำอื่น อยู่ฝั่งที่ท้ายเครื่องเหวี่ยงไปหรือไม่
+        const side = getRelativeSide(alloc, other);
+        const tailSwingsTo = (alloc.turnMode === 0) ? "Left" : "Right";
+
+        if (side === tailSwingsTo) {
+            const dist = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(pivotY - other.y, 2)) / SCALE;
+            const currentGap = dist - (maxSafeR + (acOther.Span / 2));
             if (currentGap < minGap) {
                 minGap = currentGap;
                 targetFound = true;
@@ -423,7 +434,11 @@ function getJetSafetyData(alloc, idx) {
         }
     });
 
-    return { isDanger: targetFound && minGap < 0, gap: targetFound ? minGap : null };
+    return { 
+        isDanger: targetFound && minGap < 0, 
+        gap: targetFound ? minGap : null,
+        tailSide: (alloc.turnMode === 0) ? "ซ้าย ⬅️" : "ขวา ➡️"
+    };
 }
     
 function checkDynamicJetConflict(alloc, idx) {
@@ -573,11 +588,13 @@ function updateAudit(alloc, idx) {
     const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
 
     allocations.forEach((other) => {
-        if (other.id === alloc.id) return;
-        const d = Math.abs(alloc.x - other.x) / SCALE;
-        if (other.x < alloc.x && d < minL) { minL = d; leftN = other; }
-        if (other.x > alloc.x && d < minR) { minR = d; rightN = other; }
-    });
+    if (other.id === alloc.id) return;
+    const side = getRelativeSide(alloc, other);
+    const d = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
+    
+    if (side === "Left" && d < minL) { minL = d; leftN = other; }
+    if (side === "Right" && d < minR) { minR = d; rightN = other; }
+});
 
     let auditHTML = `
         <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:15px;">
