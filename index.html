@@ -745,7 +745,7 @@ function updateAudit(alloc, idx) {
                 <span class="formula">รัศมีลมพ่นสูงสุด (จากจุดหมุน): ${maxBlastReach.toFixed(2)}m</span>
                 
                 ${jetStatus.gap !== null ? 
-                    `<span class="formula">คำนวณ: [ระยะห่าง] - [รัศมีลมพ่น + ระยะปลอดภัยข้างเคียง]</span>
+                    `<span class="formula">คำนวณ: ระยะห่างที่มี(ความยาวปีก/2+ระยะห่างระหว่างเครื่อง) - [รัศมีลมพ่น]</span>
                      <b style="color:${jetStatus.isDanger ? 'red' : 'lime'}; font-size:1.1em;">
                         คงเหลือระยะปลอดภัยสุทธิ: ${jetStatus.gap.toFixed(2)} เมตร
                      </b>` 
