@@ -421,27 +421,33 @@ function getMinSeparation(allocA, allocB) {
 // แก้ไขฟังก์ชันวาด Jet Blast ให้เหวี่ยงสลับข้างกับการเลี้ยว
 function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
     const jetRange = (ac.JetBlast || 0) * SCALE;
-    const tailDist = (ac.Length - ac.NoseToPivot) * SCALE; 
-    const innerR = tailDist; 
-    const outerR = tailDist + jetRange;
+    const pOff = ac.PivotOffset * SCALE;
+    const tailDistLong = (ac.Length - ac.NoseToPivot) * SCALE; // ระยะตามแนวแกน Y จาก Pivot ถึงท้าย
     
-    // มุมหัวเครื่อง (Radian)
-    const baseRad = (rot - 90) * Math.PI / 180;
-    // ทิศท้ายเครื่อง (ตรงข้ามหัวเครื่อง 180 องศา)
-    const backAngle = baseRad + Math.PI;
+    // 1. คำนวณหา "ระยะห่างจริง" จากจุดหมุน (ล้อ) ไปยังจุดกึ่งกลางท้ายเครื่อง (Hypotenuse)
+    const innerR = Math.sqrt(Math.pow(pOff, 2) + Math.pow(tailDistLong, 2));
+    const outerR = innerR + jetRange;
 
-    const angleDiff = Math.PI / 2; // กวาดไป 90 องศา
+    // 2. คำนวณ "มุมเบี่ยง" ภายในตัวเครื่อง (Local Angular Offset) 
+    // ว่าท้ายเครื่องทำมุมกี่องศากับจุดหมุน
+    const localAngleToTail = Math.atan2(tailDistLong, isNoseRight ? -pOff : pOff);
+
+    // 3. คำนวณมุมในพิกัดโลก (Global Angle) โดยรวมค่า Rotation ของเครื่องเข้าไป
+    // rot - 90 คือทิศทางจมูกเครื่องใน SVG
+    const baseRad = (rot - 90) * Math.PI / 180;
+    const startAngle = baseRad + localAngleToTail;
+
+    // 4. กำหนดการกวาด (90 องศา)
+    const angleDiff = Math.PI / 2;
     let endAngle, sweepFlag;
 
     if (isNoseRight) {
-        // --- เลี้ยวขวา (Mode 0) -> ท้ายเครื่องเหวี่ยงไป "ซ้าย" ---
-        // ในระบบ SVG การเพิ่มมุม (+) คือการกวาดตามเข็มนาฬิกาไปทางซ้ายของเครื่อง
-        endAngle = backAngle + angleDiff; 
+        // เลี้ยวขวา -> ท้ายเหวี่ยงไปซ้าย (ทวนเข็มในพิกัดที่เราคำนวณ)
+        endAngle = startAngle + angleDiff; 
         sweepFlag = 1; 
     } else {
-        // --- เลี้ยวซ้าย (Mode 1) -> ท้ายเครื่องเหวี่ยงไป "ขวา" ---
-        // การลดมุม (-) คือการกวาดทวนเข็มนาฬิกาไปทางขวาของเครื่อง
-        endAngle = backAngle - angleDiff;
+        // เลี้ยวซ้าย -> ท้ายเหวี่ยงไปขวา
+        endAngle = startAngle - angleDiff;
         sweepFlag = 0;
     }
 
@@ -450,13 +456,11 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
         y: py + Math.sin(ang) * r
     });
 
-    const p1i = getPt(innerR, backAngle);
+    const p1i = getPt(innerR, startAngle);
     const p2i = getPt(innerR, endAngle);
-    const p1o = getPt(outerR, backAngle);
+    const p1o = getPt(outerR, startAngle);
     const p2o = getPt(outerR, endAngle);
 
-    // วาดรูปเสี้ยววงแหวน (Annular Sector)
-    // sweep-flag ของวงนอกต้องตรงข้ามกับวงในเสมอเพื่อปิด Loop ให้ถูกต้อง
     const d = `
         M ${p1i.x} ${p1i.y} 
         A ${innerR} ${innerR} 0 0 ${sweepFlag} ${p2i.x} ${p2i.y}
@@ -467,11 +471,9 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
 
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
-    
-    const color = isDanger ? 'rgba(231, 76, 60, 0.4)' : 'rgba(46, 204, 113, 0.2)';
-    const stroke = isDanger ? '#e74c3c' : '#2ecc71';
-    
-    p.setAttribute("style", `fill: ${color}; stroke: ${stroke}; stroke-width: 1.5; stroke-dasharray: 4; pointer-events: none;`);
+    const color = isDanger ? 'rgba(231, 76, 60, 0.4)' : 'rgba(241, 196, 15, 0.2)';
+    const stroke = isDanger ? '#e74c3c' : '#f1c40f';
+    p.setAttribute("style", `fill: ${color}; stroke: ${stroke}; stroke-width: 1; stroke-dasharray: 4; pointer-events: none;`);
     layer.appendChild(p);
 }
 
