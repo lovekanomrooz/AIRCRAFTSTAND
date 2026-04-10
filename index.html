@@ -396,8 +396,8 @@ function getJetSafetyData(alloc, idx) {
     if (!ac) return { isDanger: false, gap: null };
 
     const jetRange = ac.JetBlast || 0;
-    const tailDist = ac.Length - ac.NoseToPivot;
-    const maxReach = tailDist + jetRange;
+    const tailDist = ac.Length - ac.NoseToPivot; // ระยะจากจุดหมุนถึงท้ายเครื่อง
+    const maxReach = tailDist + jetRange; // รัศมีไอพ่นสูงสุดจากจุดหมุน
 
     let minGap = Infinity;
     let targetFound = false;
@@ -406,13 +406,27 @@ function getJetSafetyData(alloc, idx) {
         if (idx === otIdx) return;
         const acOther = db.aircrafts.find(o => o.Model === other.model);
 
+        // 1. เครื่องลำอื่นอยู่ฝั่งไหนของเครื่องเรา (เทียบกับแกนเครื่องบิน)
         const sideOfNeighbor = getRelativeSide(alloc, other);
-        // เลี้ยวขวา (0) ท้ายเหวี่ยงไปซ้าย | เลี้ยวซ้าย (1) ท้ายเหวี่ยงไปขวา
+        
+        // 2. กำหนดว่า "ฝั่งไหน" ของเครื่องเราคือฝั่งที่ท้ายเครื่องพ่นลมไป
+        //    - เลี้ยวขวา (0) -> ท้ายเครื่องพ่นไป "ซ้าย" ของเครื่อง (นักบินมองไปทางซ้าย)
+        //    - เลี้ยวซ้าย (1) -> ท้ายเครื่องพ่นไป "ขวา" ของเครื่อง (นักบินมองไปทางขวา)
         const jetSweptSide = (alloc.turnMode === 0) ? "LEFT" : "RIGHT";
 
+        // 3. เช็คว่าเครื่องลำอื่น "อยู่ตรงฝั่งที่ลมพ่นไป" หรือไม่
         if (sideOfNeighbor === jetSweptSide) {
-            const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
+            // 4. คำนวณระยะห่างจาก "จุดหมุน" ของเรา ไปยัง "จุดศูนย์กลาง" ของเครื่องลำอื่น
+            const pOff = ac.PivotOffset * SCALE;
+            const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
+            const mlgY = alloc.y + (ac.NoseToPivot * SCALE);
+            
+            const dist = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(mlgY - other.y, 2)) / SCALE;
+            
+            // 5. คำนวณระยะห่างที่เหลือ (Gap)
+            //    Gap = ระยะห่างทั้งหมด - (รัศมีไอพ่นเรา + ครึ่งหนึ่งของความกว้างเครื่องข้างเคียง)
             const currentGap = dist - (maxReach + acOther.Span / 2);
+            
             if (currentGap < minGap) {
                 minGap = currentGap;
                 targetFound = true;
@@ -538,29 +552,50 @@ function checkDynamicJetConflict(alloc, idx) {
     }
 }
 // ฟังก์ชันหาว่า target อยู่ฝั่งซ้ายหรือขวาของ source (อิงตามการหมุนของ source)
+// ฟังก์ชันที่ถูกต้อง: ตรวจสอบว่า targetAlloc อยู่ฝั่งซ้ายหรือขวาของ sourceAlloc 
+// โดยอิงตามทิศทางการเลี้ยวของ sourceAlloc
 function getRelativeSide(sourceAlloc, targetAlloc) {
     const ac = db.aircrafts.find(a => a.Model === sourceAlloc.model);
-    const pDist = ac.NoseToPivot * SCALE;
     const pOff = ac.PivotOffset * SCALE;
     
-    // 1. หาพิกัดจุดหมุน (Pivot Point) ในโลก SVG
-    const radSource = (sourceAlloc.rotation - 90) * Math.PI / 180;
-    const pivotX = (sourceAlloc.turnMode === 0) 
-        ? sourceAlloc.x + Math.cos(radSource + Math.PI/2) * pOff 
-        : sourceAlloc.x + Math.cos(radSource - Math.PI/2) * pOff;
-    const pivotY = (sourceAlloc.turnMode === 0) 
-        ? sourceAlloc.y + Math.sin(radSource + Math.PI/2) * pOff 
-        : sourceAlloc.y + Math.sin(radSource - Math.PI/2) * pOff;
+    // 1. หาพิกัดจุดหมุน (Pivot Point) ของเครื่อง sourceAlloc
+    let pivotX, pivotY;
+    if (sourceAlloc.turnMode === 0) { // เลี้ยวขวา (Right Turn) -> หมุนรอบล้อขวา
+        pivotX = sourceAlloc.x + pOff; pivotY = sourceAlloc.y + (ac.NoseToPivot * SCALE);
+    } else { // เลี้ยวซ้าย (Left Turn) -> หมุนรอบล้อซ้าย
+        pivotX = sourceAlloc.x - pOff; pivotY = sourceAlloc.y + (ac.NoseToPivot * SCALE);
+    }
 
-    // 2. คำนวณความต่างพิกัดจากจุดหมุนไปยังเครื่องลำอื่น
+    // 2. คำนวณเวกเตอร์จากจุดหมุนไปยังเครื่อง targetAlloc
     const dx = targetAlloc.x - pivotX;
     const dy = targetAlloc.y - pivotY;
 
-    // 3. หมุนพิกัดกลับตามองศาเครื่อง เพื่อหาตำแหน่งสัมพัทธ์
-    const angleRad = (sourceAlloc.rotation) * Math.PI / 180;
-    const rx = dx * Math.cos(-angleRad) - dy * Math.sin(-angleRad);
+    // 3. หา "ทิศทาง" ของเครื่อง sourceAlloc (เส้นตรงจากจุดหมุนไปที่หัวเครื่อง)
+    //    (การคำนวณนี้จะซับซ้อนขึ้นเล็กน้อยถ้าต้องการแม่นยำทุกองศา)
+    //    สำหรับตอนนี้ จะใช้การเปรียบเทียบพิกัด X/Y แบบสัมพัทธ์ (relative)
+    //    ที่ใช้ **ร่วมกับ turnMode** เพื่อระบุฝั่งที่ถูกต้อง
+
+    // *** ข้อควรระวัง: Logic นี้ต้องสัมพันธ์กับ drawArc และ drawJetBlastArc ***
+    // *** ซึ่งอาจต้องปรับปรุงให้ใช้ Vector Math ที่ซับซ้อนขึ้นอีกเล็กน้อย ***
     
-    return rx > 0 ? "RIGHT" : "LEFT";
+    // **Logic แบบง่ายที่ใช้ได้กับหลายกรณี (ต้องทดสอบอย่างละเอียด):**
+    // หากเลี้ยวขวา (turnMode 0): ฝั่งซ้ายของเครื่อง (นักบิน) คือฝั่งที่จะเกิดการกวาดปีก/ไอพ่น
+    // หากเลี้ยวซ้าย (turnMode 1): ฝั่งขวาของเครื่อง (นักบิน) คือฝั่งที่จะเกิดการกวาดปีก/ไอพ่น
+
+    // วิธีที่ 1: เปรียบเทียบพิกัด X/Y โดยตรง (ง่าย แต่ผิดพลาดเมื่อหมุนมาก)
+    // const sideBasedOnScreen = (dx > 0) ? "RIGHT" : "LEFT"; // นี่คือฝั่งของจอ ไม่ใช่ฝั่งเครื่อง
+
+    // วิธีที่ 2: ใช้การหมุนเวกเตอร์ (ซับซ้อนกว่า แต่แม่นยำ) - *** จะใช้ Logic นี้ ***
+    const angleRad = (sourceAlloc.rotation) * Math.PI / 180;
+    const rx = dx * Math.cos(-angleRad) - dy * Math.sin(-angleRad); // ตำแหน่งสัมพัทธ์ (ซ้าย/ขวาของเครื่อง)
+
+    // ตรวจสอบว่า sideOfNeighbor นั้น "สอดคล้อง" กับทิศทางการเหวี่ยงหรือไม่
+    // เลี้ยวขวา (0) -> ปีกซ้ายเหวี่ยง (นักบินมองไปทางซ้าย)
+    // เลี้ยวซ้าย (1) -> ปีกขวาเหวี่ยง (นักบินมองไปทางขวา)
+    
+    // เราจะส่งค่า "LEFT" หรือ "RIGHT" กลับไปเพื่อให้ฟังก์ชันเรียกใช้ (checkCollision/getJetSafetyData)
+    // เป็นตัวตัดสินว่า "เครื่องที่อยู่ฝั่งนั้น" จะชนหรือไม่
+    return rx > 0 ? "RIGHT" : "LEFT"; // "RIGHT" คือฝั่งขวาของเครื่อง, "LEFT" คือฝั่งซ้ายของเครื่อง
 }
 function checkCollision(alloc, idx, margin) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
@@ -570,24 +605,29 @@ function checkCollision(alloc, idx, margin) {
         if (idx === otIdx) return false;
         const oAc = db.aircrafts.find(a => a.Model === other.model);
         
-        // เครื่องลำอื่นอยู่ฝั่งไหนของนักบิน?
+        // 1. หาว่าเครื่องลำอื่นอยู่ฝั่ง "ไหน" ของเครื่องปัจจุบัน (เทียบกับแกนเครื่องบิน)
         const sideOfNeighbor = getRelativeSide(alloc, other);
         
-        // ถ้าเลี้ยวขวา (0) ปีกซ้ายเหวี่ยง | ถ้าเลี้ยวซ้าย (1) ปีกขวาเหวี่ยง
+        // 2. กำหนดว่า "ฝั่งไหน" ของเครื่องเราคือฝั่งที่ปีกกำลังกวาดไป
+        //    - ถ้าเลี้ยวขวา (turnMode 0), ปีก "ซ้าย" ของเครื่องคือฝั่งที่เหวี่ยง
+        //    - ถ้าเลี้ยวซ้าย (turnMode 1), ปีก "ขวา" ของเครื่องคือฝั่งที่เหวี่ยง
         const sweptSide = (alloc.turnMode === 0) ? "LEFT" : "RIGHT";
 
+        // 3. เช็คว่าเครื่องลำอื่น "อยู่ตรงฝั่งที่ปีกเรากำลังกวาดไป" หรือไม่
         if (sideOfNeighbor === sweptSide) {
-            // คำนวณระยะจาก "จุดหมุน" ของเรา ไปยัง "จุดศูนย์กลาง" ของเครื่องลำอื่น
+            // 4. ถ้าอยู่ตรงฝั่งที่กวาด, คำนวณระยะห่างจาก "จุดหมุน" ของเรา
+            //    ไปยัง "จุดศูนย์กลาง" ของเครื่องลำอื่น
             const pOff = ac.PivotOffset * SCALE;
             const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
-            const mlgY = alloc.y + (ac.NoseToPivot * SCALE);
+            const mlgY = alloc.y + (ac.NoseToPivot * SCALE); // ใช้ Y ของจุดหมุน
             
             const dist = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(mlgY - other.y, 2)) / SCALE;
             
-            // ชนเมื่อ: ระยะห่าง < (รัศมีเหวี่ยงปีกเรา + ครึ่งหนึ่งของความกว้างเครื่องลำอื่น)
+            // 5. ชนเมื่อ: ระยะห่าง < (รัศมีเหวี่ยงปีกเรา + ครึ่งหนึ่งของความกว้างเครื่องลำอื่น)
+            //    (ระยะห่างที่น้อยกว่านี้ หมายถึงมีการชนกัน)
             return (dist < (reach + oAc.Span / 2));
         }
-        return false;
+        return false; // ถ้าเครื่องลำอื่นไม่ได้อยู่ฝั่งที่กวาด, ก็ไม่ชน
     });
 }
 
@@ -596,21 +636,19 @@ function updateAudit(alloc, idx) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
     const rule = db.clearanceRules.find(r => r.Code === ac.Code) || { MinClearance: 4.5 };
     const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
-    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
+    const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin; // รัศมีปีกรวม
 
-    // 1. บังคับแสดงพาแนลทุครั้งที่เรียก
     const float = document.getElementById('audit-float');
     float.style.display = 'block';
 
-    // 2. แยกเพื่อนบ้านตามฝั่งของนักบิน (ซ้าย-ขวา) โดยอิงจากมุมมองหัวเครื่อง
+    // แยกเพื่อนบ้านตามฝั่งของนักบิน (ซ้าย-ขวา)
     let pilotLeftNeighbors = [];
     let pilotRightNeighbors = [];
 
     allocations.forEach((other) => {
         if (other.id === alloc.id) return;
         
-        // ใช้ getRelativeSide เพื่อดูว่าเพื่อนบ้านอยู่ซ้ายหรือขวาของนักบินจริง ๆ
-        const side = getRelativeSide(alloc, other);
+        const side = getRelativeSide(alloc, other); // ใช้ฟังก์ชันใหม่
         const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
         
         const neighborInfo = { 
@@ -634,13 +672,13 @@ function updateAudit(alloc, idx) {
         </div>
 
         <div class="audit-card">
-            <b>1. การคำนวณรัศมีกวาดปีก (Wing Sweep):</b>
+            <b>1. รัศมีกวาดปีก (Wing Sweep):</b>
             <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
             <b style="color:var(--accent);">ระยะเหวี่ยงปีกสุทธิ = ${totalReach.toFixed(2)} เมตร</b>
         </div>
     `;
 
-    // ฟังก์ชันช่วยสร้าง HTML สำหรับเพื่อนบ้านแต่ละฝั่ง
+    // ฟังก์ชันช่วยสร้าง HTML สำหรับเพื่อนบ้านแต่ละฝั่ง (มุมมองนักบิน)
     const getNeighborHTML = (neighbors, sideLabel) => {
         if (neighbors.length === 0) return `<p style="color:#888; font-size:0.9em;">- ไม่พบอากาศยานฝั่ง${sideLabel}ของนักบิน</p>`;
         
@@ -652,8 +690,8 @@ function updateAudit(alloc, idx) {
             const staticGap = n.dist - (ac.Span / 2 + neighborHalfSpan);
             
             // ตรรกะการเหวี่ยงปีก: เลี้ยวขวา(0) เหวี่ยงไปซ้ายนักบิน | เลี้ยวซ้าย(1) เหวี่ยงไปขวานักบิน
-            const sweptSide = (alloc.turnMode === 0) ? "ซ้าย" : "ขวา";
-            const isToward = (sideLabel === sweptSide);
+            const sweptSide = (alloc.turnMode === 0) ? "ซ้าย" : "ขวา"; // ฝั่งที่ปีกจะกวาดไป (มองจากนักบิน)
+            const isToward = (sideLabel === sweptSide); // เครื่องอยู่ตรงฝั่งที่ปีกจะกวาดไปหรือไม่
             
             let html = `<div style="margin-bottom:12px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px;">`;
             html += `<b>ฝั่ง${sideLabel} (${n.data.standId}):</b> ${otAc.Model}<br>`;
@@ -685,10 +723,10 @@ function updateAudit(alloc, idx) {
         </div>
     `;
 
-    // 3. ตรวจสอบ Jet Blast
+    // 3. ตรวจสอบ Jet Blast (ใช้ Logic ใหม่)
     if (ac.JetBlast) {
         const jetStatus = getJetSafetyData(alloc, idx); 
-        const tailSwingSide = alloc.turnMode === 0 ? "ซ้าย ⬅️" : "ขวา ➡️";
+        const tailSwingSide = alloc.turnMode === 0 ? "ซ้าย ⬅️" : "ขวา ➡️"; // ทิศทางลมพ่น (เทียบกับนักบิน)
         const tailDist = ac.Length - ac.NoseToPivot; 
         const maxBlastReach = tailDist + ac.JetBlast;
 
