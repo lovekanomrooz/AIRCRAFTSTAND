@@ -250,17 +250,24 @@ function checkJetConflict(alloc, idx) {
 
     // 1. วาดผังหลุมจอด
     db.stands.forEach(st => {
-        const w = st.Width * SCALE, l = st.Length * SCALE;
-        let cx = (st.ParentID && xMap[st.ParentID]) ? xMap[st.ParentID] + (st.OffsetX * SCALE) : (curX + w/2);
-        xMap[st.StandID] = cx;
-        if (!st.ParentID) curX += w;
+    const w = st.Width * SCALE, l = st.Length * SCALE;
+    let cx = (st.ParentID && xMap[st.ParentID]) ? xMap[st.ParentID] + (st.OffsetX * SCALE) : (curX + w/2);
+    xMap[st.StandID] = cx;
+    if (!st.ParentID) curX += w;
 
-        bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y}" width="${w}" height="${l}" class="stand-box" />`;
-        bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y + (12.5*SCALE)}" width="${w}" height="${l - (25*SCALE)}" class="no-go-line" />`;
-        bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 12.5*SCALE}" r="6" class="t-mark" />`;
-        bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 30.0*SCALE}" r="6" class="t-mark" />`;
-        bg.innerHTML += `<text x="${cx}" y="${HEADER_Y + l + 20}" fill="#888" text-anchor="middle" font-size="11" pointer-events="none">${st.StandID}</text>`;
-    });
+    bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y}" width="${w}" height="${l}" class="stand-box" />`;
+    bg.innerHTML += `<rect x="${cx-w/2}" y="${HEADER_Y + (12.5*SCALE)}" width="${w}" height="${l - (25*SCALE)}" class="no-go-line" />`;
+    bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 12.5*SCALE}" r="6" class="t-mark" />`;
+    bg.innerHTML += `<circle cx="${cx}" cy="${HEADER_Y + 30.0*SCALE}" r="6" class="t-mark" />`;
+
+    // --- ส่วนที่แก้ไข/เพิ่มเติมอยู่ตรงนี้ครับ ---
+    // แสดงชื่อหลุมจอด (เพิ่ม font-weight: bold เพื่อให้ชัดขึ้น)
+    bg.innerHTML += `<text x="${cx}" y="${HEADER_Y + l + 20}" fill="#fff" text-anchor="middle" font-size="12" font-weight="bold" pointer-events="none">${st.StandID}</text>`;
+    
+    // แสดงขนาดกว้าง x ยาว (หน่วยเมตร)
+    bg.innerHTML += `<text x="${cx}" y="${HEADER_Y + l + 38}" fill="#888" text-anchor="middle" font-size="11" pointer-events="none">${st.Width} x ${st.Length} m</text>`;
+    // ---------------------------------------
+});
 
     // 2. วาดเครื่องบินและระบบความปลอดภัยแบบ Dynamic
     allocations.forEach((alloc, idx) => {
