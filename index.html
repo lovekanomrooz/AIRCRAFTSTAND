@@ -227,17 +227,11 @@
 }
 // ฟังก์ชันหาว่าจุดเป้าหมาย อยู่ทาง "ซ้าย" หรือ "ขวา" ของเครื่องบิน (อิงตามการหมุน)
 function getRelativeSide(subject, target) {
-    // คำนวณความต่างพิกัด
     const dx = target.x - subject.x;
     const dy = target.y - subject.y;
-    
-    // แปลงมุมเครื่องบินเป็นเรเดียน (ปรับทิศทางให้สอดคล้องกับระบบพิกัด)
+    // ใช้มุมติดลบเพื่อหมุนพิกัดเป้าหมายกลับมาอยู่ในระนาบเดียวกับเครื่องบิน
     const angle = -subject.rotation * Math.PI / 180;
-    
-    // ใช้สูตรหมุนแกนพิกัด (Coordinate Rotation) เพื่อหาตำแหน่งของเป้าหมายใน "มุมมองของเครื่องบิน"
-    // ถ้า localX > 0 คืออยู่ทางขวาของเครื่อง | localX < 0 คืออยู่ทางซ้ายของเครื่อง
     const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
-    
     return localX > 0 ? "Right" : "Left";
 }
 // ฟังก์ชันช่วยตรวจสอบการชนของ Jet Blast
@@ -295,7 +289,7 @@ function checkJetConflict(alloc, idx) {
         const pDist = ac.NoseToPivot * SCALE, pOff = ac.PivotOffset * SCALE;
         const r = (ac.SweepRadius + extraMargin) * SCALE;
         const mlgY = alloc.y + pDist;
-
+        
         // คำนวณจุดหมุน (Pivot): เลี้ยวขวา(0) ใช้ล้อขวา RH | เลี้ยวซ้าย(1) ใช้ล้อซ้าย LH
         const pivotX = (alloc.turnMode === 0) ? alloc.x + pOff : alloc.x - pOff;
 
@@ -551,36 +545,37 @@ function checkDynamicJetConflict(alloc, idx) {
     }
 }
 
-   function checkCollision(alloc, idx, margin) {
+function checkCollision(alloc, idx, margin) {
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
-    // ระยะเหวี่ยงรวม = ระยะห่างจากกึ่งกลางถึงจุดหมุน + รัศมีปีก + margin
+    
+    // --- สูตรที่ถูกต้อง: ระยะเหวี่ยงจาก Centerline ---
     const totalReach = ac.PivotOffset + ac.SweepRadius + margin;
+
+    // หาตำแหน่งจุดหมุน (Pivot) เพื่อใช้เป็นจุดศูนย์กลางการวัดระยะ
+    const pOff = ac.PivotOffset * SCALE;
+    const rad = (alloc.rotation - 90) * Math.PI / 180;
+    const pivotAngle = rad + (alloc.turnMode === 0 ? Math.PI/2 : -Math.PI/2);
+    const pivotX = alloc.x + Math.cos(pivotAngle) * pOff;
+    const pivotY = alloc.y + Math.sin(pivotAngle) * pOff;
 
     return allocations.some((other, otIdx) => {
         if (idx === otIdx) return false;
-        
         const oAc = db.aircrafts.find(a => a.Model === other.model);
-        
-        // 1. หาว่าเครื่องลำอื่นอยู่ทาง "ซ้าย" หรือ "ขวา" ของเรา (อิงตามการหมุนของเครื่องเรา)
+
         const sideOfNeighbor = getRelativeSide(alloc, other);
-        
-        // 2. หาว่าทิศทางที่เราเลี้ยว จะทำให้ปีกเหวี่ยงไปฝั่งไหน
-        // เลี้ยวขวา (0) -> ปีกซ้ายเหวี่ยง (Left) | เลี้ยวซ้าย (1) -> ปีกขวาเหวี่ยง (Right)
         const wingSwingSide = (alloc.turnMode === 0) ? "Left" : "Right";
 
-        // 3. ถ้าเครื่องข้างๆ อยู่ในฝั่งที่ปีกเหวี่ยงไปหา
         if (sideOfNeighbor === wingSwingSide) {
-            // คำนวณระยะห่างระหว่างจุดศูนย์กลาง (อิงตามระยะ X ของเครื่องเรา)
-            // หมายเหตุ: ในทางทฤษฎีต้องเช็คระยะจาก Pivot ถึงปีกเครื่องข้างๆ
-            const dist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
+            // วัดระยะจาก "จุดหมุน" ไปยัง "กึ่งกลางเครื่องข้างๆ"
+            const distPivotToOtherCenter = Math.sqrt(Math.pow(pivotX - other.x, 2) + Math.pow(pivotY - other.y, 2)) / SCALE;
             
-            // ปลอดภัยถ้า: ระยะห่างระหว่างลำ > (ระยะเหวี่ยงของเรา + ครึ่งความกว้างปีกเขา)
-            return dist < (totalReach + oAc.Span / 2);
+            // จะชนเมื่อ: ระยะห่าง < (รัศมีจากจุดหมุน + ครึ่งปีกเครื่องข้างๆ)
+            // ซึ่ง ac.SweepRadius คือรัศมีจากจุดหมุนอยู่แล้ว
+            return distPivotToOtherCenter < (ac.SweepRadius + margin + oAc.Span / 2);
         }
         return false;
     });
 }
-
 function updateAudit(alloc, idx) {
     if (!alloc) return;
     const ac = db.aircrafts.find(a => a.Model === alloc.model);
@@ -608,7 +603,7 @@ function updateAudit(alloc, idx) {
     if (side === "Left" && d < minL) { minL = d; leftN = other; }
     if (side === "Right" && d < minR) { minR = d; rightN = other; }
 });
-
+const totalReachFromCenter = ac.PivotOffset + ac.SweepRadius + extraMargin;
     let auditHTML = `
         <div style="border-bottom:1px solid #555; padding-bottom:10px; margin-bottom:15px;">
             <b style="font-size:1.3em; color:var(--accent);">📍 หลุม: ${alloc.standId}</b><br>
@@ -616,10 +611,10 @@ function updateAudit(alloc, idx) {
         </div>
 
         <div class="audit-card">
-            <b>1. การคำนวณรัศมีกวาดปีก (Wing Sweep):</b>
-            <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
-            <b style="color:var(--accent);">ระยะเหวี่ยงปีกสุทธิ = ${totalReach.toFixed(2)} เมตร</b>
-        </div>
+        <b>1. การคำนวณรัศมีกวาดปีก (Wing Sweep):</b>
+        <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
+        <b style="color:var(--accent);">ระยะเหวี่ยงสุทธิจากกึ่งกลาง = ${totalReachFromCenter.toFixed(2)} เมตร</b>
+    </div>
     `;
 
     // ฟังก์ชันช่วยสร้าง HTML สำหรับเพื่อนบ้าน (คงเดิมตามที่คุณต้องการ)
