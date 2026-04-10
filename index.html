@@ -258,76 +258,6 @@ function checkJetConflict(alloc, idx) {
         return dist < jetRange;
     });
 }
-////////////////////////////////////
-// 1. แปลงโครงสร้างเครื่องบินเป็นเส้น (Segments) ในพิกัดโลก
-function getAircraftSegments(alloc) {
-    const ac = db.aircrafts.find(a => a.Model === alloc.model);
-    const L = ac.Length * SCALE;
-    const S = ac.Span * SCALE;
-    const P = ac.NoseToPivot * SCALE;
-    const rad = (alloc.rotation) * Math.PI / 180;
-
-    const transform = (lx, ly) => ({
-        x: alloc.x + (lx * Math.cos(rad) - ly * Math.sin(rad)),
-        y: alloc.y + (lx * Math.sin(rad) + ly * Math.cos(rad))
-    });
-
-    return [
-        { p1: transform(0, 0), p2: transform(0, L), label: "Fuselage" }, // Nose to Tail
-        { p1: transform(-S/2, P), p2: transform(S/2, P), label: "Wings" } // Left to Right Wing
-    ];
-}
-
-// 2. คำนวณหาจุดที่ใกล้ที่สุดระหว่าง 2 เส้นตรง (Segment to Segment)
-function closestPointsBetweenSegments(s1, s2) {
-    const {p1: a, p2: b} = s1;
-    const {p1: c, p2: d} = s2;
-
-    const closestPointOnSegment = (p, a, b) => {
-        const ab = { x: b.x - a.x, y: b.y - a.y };
-        const ap = { x: p.x - a.x, y: p.y - a.y };
-        let t = (ap.x * ab.x + ap.y * ab.y) / (ab.x * ab.x + ab.y * ab.y);
-        t = Math.max(0, Math.min(1, t));
-        return { x: a.x + t * ab.x, y: a.y + t * ab.y };
-    };
-
-    let minNodes = [a, b, c, d];
-    let minDist = Infinity;
-    let bestPoints = { pA: a, pB: c };
-
-    // เช็คระยะห่างระหว่างจุดปลายของเส้นหนึ่งไปยังอีกเส้นหนึ่ง
-    const check = (p, start, end, isFirst) => {
-        const cp = closestPointOnSegment(p, start, end);
-        const dist = Math.sqrt(Math.pow(p.x - cp.x, 2) + Math.pow(p.y - cp.y, 2));
-        if (dist < minDist) {
-            minDist = dist;
-            bestPoints = isFirst ? { pA: p, pB: cp } : { pA: cp, pB: p };
-        }
-    };
-
-    check(a, c, d, true); check(b, c, d, true);
-    check(c, a, b, false); check(d, a, b, false);
-
-    return { dist: minDist, ...bestPoints };
-}
-
-// 3. หาระยะห่างที่สั้นที่สุดระหว่างเครื่องบิน 2 ลำ (เปรียบเทียบทุกเส้น)
-function getMinSeparation(allocA, allocB) {
-    const segsA = getAircraftSegments(allocA);
-    const segsB = getAircraftSegments(allocB);
-    let minRes = { dist: Infinity };
-
-    segsA.forEach(sA => {
-        segsB.forEach(sB => {
-            const res = closestPointsBetweenSegments(sA, sB);
-            if (res.dist < minRes.dist) {
-                minRes = { ...res, labelA: sA.label, labelB: sB.label };
-            }
-        });
-    });
-    return minRes;
-}
-///////////////////////////////////////
  function draw() {
     const bg = document.getElementById('bg-layer');
     const sw = document.getElementById('swing-layer');
@@ -419,39 +349,29 @@ function getMinSeparation(allocA, allocB) {
 
    // ฟังก์ชันวาดพื้นที่กวาดของแรงลม (Swept Jet Blast Zone)
 // แก้ไขฟังก์ชันวาด Jet Blast ให้เหวี่ยงสลับข้างกับการเลี้ยว
-// แก้ไขฟังก์ชันวาด Jet Blast ให้เริ่มต้นจากท้ายเครื่อง
 function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
     const jetRange = (ac.JetBlast || 0) * SCALE;
+    const tailDist = (ac.Length - ac.NoseToPivot) * SCALE; 
+    const innerR = tailDist; 
+    const outerR = tailDist + jetRange;
     
-    // 1. คำนวณระยะทางจาก "แนวแกนล้อ" ไปยัง "ท้ายเครื่อง"
-    const dy = (ac.Length - ac.NoseToPivot); // ระยะแนวดิ่งจากจุดหมุนถึงท้าย
-    const dx = ac.PivotOffset;              // ระยะแนวราบจากจุดหมุนถึงเส้นกลางเครื่อง
-    
-    // 2. รัศมีจริงจากจุดหมุน (ล้อ) ไปถึงท้ายเครื่อง (ใช้สูตรตรีโกณมิติ)
-    // นี่คือรัศมีวงในที่ถูกต้อง ไม่ว่าเครื่องจะหมุนกี่องศา
-    const innerR = Math.sqrt(dx * dx + dy * dy) * SCALE;
-    const outerR = innerR + jetRange;
-    
-    // 3. หามุมเบี่ยงเบน (Angular Offset) ของท้ายเครื่องที่กระทำต่อจุดหมุน
-    const angleOffset = Math.atan2(dx, dy); 
+    // มุมหัวเครื่อง (Radian)
+    const baseRad = (rot - 90) * Math.PI / 180;
+    // ทิศท้ายเครื่อง (ตรงข้ามหัวเครื่อง 180 องศา)
+    const backAngle = baseRad + Math.PI;
 
-    // 4. หามุมทิศทางด้านหลังเครื่อง (Base Back Angle) ในพิกัด SVG
-    // (rot - 90) คือทิศหัวเครื่อง, ดังนั้น (rot + 90) คือทิศท้ายเครื่อง
-    const baseBackRad = (rot + 90) * Math.PI / 180;
-
-    let tailAngleStart, tailAngleEnd, sweepFlag;
+    const angleDiff = Math.PI / 2; // กวาดไป 90 องศา
+    let endAngle, sweepFlag;
 
     if (isNoseRight) {
-        // --- เลี้ยวขวา (หมุนรอบล้อขวา) ---
-        // ท้ายเครื่องจะอยู่ทาง "ซ้าย" ของจุดหมุนเสมอ (ลบค่า offset ออกจากมุมพื้นฐาน)
-        tailAngleStart = baseBackRad - angleOffset;
-        tailAngleEnd = tailAngleStart + (Math.PI / 2); // กวาดไป 90 องศา
-        sweepFlag = 1;
+        // --- เลี้ยวขวา (Mode 0) -> ท้ายเครื่องเหวี่ยงไป "ซ้าย" ---
+        // ในระบบ SVG การเพิ่มมุม (+) คือการกวาดตามเข็มนาฬิกาไปทางซ้ายของเครื่อง
+        endAngle = backAngle + angleDiff; 
+        sweepFlag = 1; 
     } else {
-        // --- เลี้ยวซ้าย (หมุนรอบล้อซ้าย) ---
-        // ท้ายเครื่องจะอยู่ทาง "ขวา" ของจุดหมุนเสมอ (บวกค่า offset เข้ากับมุมพื้นฐาน)
-        tailAngleStart = baseBackRad + angleOffset;
-        tailAngleEnd = tailAngleStart - (Math.PI / 2); // กวาดทวนเข็ม 90 องศา
+        // --- เลี้ยวซ้าย (Mode 1) -> ท้ายเครื่องเหวี่ยงไป "ขวา" ---
+        // การลดมุม (-) คือการกวาดทวนเข็มนาฬิกาไปทางขวาของเครื่อง
+        endAngle = backAngle - angleDiff;
         sweepFlag = 0;
     }
 
@@ -460,12 +380,13 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
         y: py + Math.sin(ang) * r
     });
 
-    const p1i = getPt(innerR, tailAngleStart);
-    const p2i = getPt(innerR, tailAngleEnd);
-    const p1o = getPt(outerR, tailAngleStart);
-    const p2o = getPt(outerR, tailAngleEnd);
+    const p1i = getPt(innerR, backAngle);
+    const p2i = getPt(innerR, endAngle);
+    const p1o = getPt(outerR, backAngle);
+    const p2o = getPt(outerR, endAngle);
 
-    // วาดรูปทรงพื้นที่ไอพ่น (Annular Sector)
+    // วาดรูปเสี้ยววงแหวน (Annular Sector)
+    // sweep-flag ของวงนอกต้องตรงข้ามกับวงในเสมอเพื่อปิด Loop ให้ถูกต้อง
     const d = `
         M ${p1i.x} ${p1i.y} 
         A ${innerR} ${innerR} 0 0 ${sweepFlag} ${p2i.x} ${p2i.y}
@@ -477,8 +398,7 @@ function drawJetBlastArc(layer, px, py, ac, isNoseRight, isDanger, rot) {
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
     p.setAttribute("d", d);
     
-    // ตั้งค่าสีเขียวตามที่คุณต้องการ
-    const color = isDanger ? 'rgba(231, 76, 60, 0.5)' : 'rgba(46, 204, 113, 0.3)';
+    const color = isDanger ? 'rgba(231, 76, 60, 0.4)' : 'rgba(46, 204, 113, 0.2)';
     const stroke = isDanger ? '#e74c3c' : '#2ecc71';
     
     p.setAttribute("style", `fill: ${color}; stroke: ${stroke}; stroke-width: 1.5; stroke-dasharray: 4; pointer-events: none;`);
@@ -600,30 +520,41 @@ function checkDynamicJetConflict(alloc, idx) {
 }
 
     function drawSpecificGap(layer, alloc, idx) {
+    // 1. นำเครื่องบินทุกลำมาเรียงลำดับตามพิกัด X (ซ้ายไปขวา)
     const sortedAlloc = [...allocations].sort((a, b) => a.x - b.x);
+    
+    // 2. หา Index ของเครื่องปัจจุบันในรายการที่เรียงแล้ว
     const currentSortedIdx = sortedAlloc.findIndex(a => a.id === alloc.id);
     
+    // 3. วาดเส้นเชื่อมเฉพาะกับเครื่องที่อยู่ "ถัดไปทางขวา" 1 ลำ (ถ้ามี)
     if (currentSortedIdx < sortedAlloc.length - 1) {
         const other = sortedAlloc[currentSortedIdx + 1];
-        
-        // ใช้ฟังก์ชันใหม่เพื่อหาจุดที่ใกล้กันที่สุดจริงๆ
-        const res = getMinSeparation(alloc, other);
+        const myAc = db.aircrafts.find(a => a.Model === alloc.model);
+        const otAc = db.aircrafts.find(a => a.Model === other.model);
 
-        // วาดเส้นประสีฟ้าเชื่อมจุดวิกฤต
+        // คำนวณจุดปลายปีก (ปีกขวาของเรา -> ปีกซ้ายของเขา)
+        const x1 = alloc.x + (myAc.Span * SCALE / 2);
+        const x2 = other.x - (otAc.Span * SCALE / 2);
+        const y1 = alloc.y + (myAc.NoseToPivot * SCALE);
+        const y2 = other.y + (otAc.NoseToPivot * SCALE);
+
+        const gapVal = (x2 - x1) / SCALE;
+
+        // วาดเส้นประสีฟ้า
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", res.pA.x); line.setAttribute("y1", res.pA.y);
-        line.setAttribute("x2", res.pB.x); line.setAttribute("y2", res.pB.y);
+        line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+        line.setAttribute("x2", x2); line.setAttribute("y2", y2);
         line.setAttribute("class", "wing-gap-line");
-        line.setAttribute("style", "stroke: #3498db; stroke-width: 2.5; stroke-dasharray: 4;");
+        line.setAttribute("style", "stroke: #3498db; stroke-width: 2; stroke-dasharray: 5;");
         layer.appendChild(line);
 
-        // แสดงระยะทางตรงกลางเส้น
+        // วาดตัวเลขสีขาว
         const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        txt.setAttribute("x", (res.pA.x + res.pB.x) / 2);
-        txt.setAttribute("y", (res.pA.y + res.pB.y) / 2 - 10);
-        txt.setAttribute("style", "fill: #3498db; font-weight: bold; font-size: 13px; paint-order: stroke; stroke: #000; stroke-width: 3px;");
+        txt.setAttribute("x", (x1 + x2) / 2);
+        txt.setAttribute("y", (y1 + y2) / 2 - 10);
+        txt.setAttribute("style", "fill: #ffffff; font-weight: bold; font-size: 14px; paint-order: stroke; stroke: #000; stroke-width: 2px;");
         txt.setAttribute("text-anchor", "middle");
-        txt.textContent = (res.dist / SCALE).toFixed(2) + "m";
+        txt.textContent = gapVal.toFixed(2) + "m";
         layer.appendChild(txt);
     }
 }
@@ -666,7 +597,7 @@ function updateAudit(alloc, idx) {
     const extraMargin = parseFloat(document.getElementById('extra-margin').value) || 0;
     const totalReach = ac.PivotOffset + ac.SweepRadius + extraMargin;
 
-    // 1. แสดงพาแนลรายละเอียด
+    // 1. แสดงพาแนล
     const float = document.getElementById('audit-float');
     float.style.display = 'block';
 
@@ -674,17 +605,10 @@ function updateAudit(alloc, idx) {
     let leftN = null, rightN = null;
     allocations.forEach((other) => {
         if (other.id === alloc.id) return;
-        
-        const side = getRelativeSide(alloc, other); 
-        // หาระยะห่างศูนย์กลางเบื้องต้นเพื่อใช้ระบุลำที่ "ใกล้ที่สุด" ในแต่ละฝั่ง
-        const centerDist = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
-        
-        if (side === "LEFT") { 
-            if (!leftN || centerDist < leftN.centerDist) leftN = { ...other, centerDist }; 
-        }
-        if (side === "RIGHT") { 
-            if (!rightN || centerDist < rightN.centerDist) rightN = { ...other, centerDist }; 
-        }
+        const side = getRelativeSide(alloc, other); // ใช้ฟังก์ชันหาฝั่งสัมพัทธ์
+        const d = Math.sqrt(Math.pow(alloc.x - other.x, 2) + Math.pow(alloc.y - other.y, 2)) / SCALE;
+        if (side === "LEFT") { if (!leftN || d < leftN.d) leftN = { ...other, d }; }
+        if (side === "RIGHT") { if (!rightN || d < rightN.d) rightN = { ...other, d }; }
     });
 
     let auditHTML = `
@@ -696,36 +620,33 @@ function updateAudit(alloc, idx) {
         <div class="audit-card">
             <b>1. การคำนวณรัศมีกวาดปีก (Wing Sweep):</b>
             <span class="formula">R_Total = Pivot(${ac.PivotOffset}m) + R4(${ac.SweepRadius}m) + Extra(${extraMargin}m)</span>
-            <b style="color:var(--accent);">ระยะเหวี่ยงปีกสูงสุด = ${totalReach.toFixed(2)} เมตร</b>
+            <b style="color:var(--accent);">ระยะเหวี่ยงปีกสุทธิ = ${totalReach.toFixed(2)} เมตร</b>
         </div>
     `;
 
-    // ฟังก์ชันช่วยสร้าง HTML สำหรับเพื่อนบ้าน (ใช้การคำนวณจุดที่ใกล้ที่สุด)
+    // ฟังก์ชันช่วยสร้าง HTML สำหรับเพื่อนบ้าน (ผสาน UI ละเอียด + Logic มุมมองนักบิน)
     const getNeighborHTML = (neighbor, label) => {
         if (!neighbor) return `<p style="color:#888; font-size:0.9em;">- ไม่พบอากาศยานฝั่ง${label}ของนักบิน</p>`;
         
         const oAc = db.aircrafts.find(a => a.Model === neighbor.model);
+        const neighborHalfSpan = oAc.Span / 2;
+        const staticGap = neighbor.d - (ac.Span / 2 + neighborHalfSpan);
         
-        // --- ใช้ Logic เรขาคณิตใหม่: หาจุดที่ใกล้ที่สุดระหว่างเครื่องบิน 2 ลำ ---
-        const minSep = getMinSeparation(alloc, neighbor);
-        const staticGap = minSep.dist / SCALE;
-        
-        // Logic การเหวี่ยงปีก: เลี้ยวขวา(0) เหวี่ยงหาฝั่งขวา | เลี้ยวซ้าย(1) เหวี่ยงหาฝั่งซ้าย
+        // --- Logic การเหวี่ยงปีกที่ถูกต้องตามฟิสิกส์ ---
+        // เลี้ยวขวา (0) ปีกเหวี่ยงไปหาฝั่ง "ขวา" นักบิน
+        // เลี้ยวซ้าย (1) ปีกเหวี่ยงไปหาฝั่ง "ซ้าย" นักบิน
         const sweptSide = (alloc.turnMode === 0) ? "ขวา" : "ซ้าย";
         const isToward = (label === sweptSide);
         
         let html = `<div style="margin-bottom:12px; border-left:3px solid ${isToward?'var(--accent)':'#444'}; padding-left:10px;">`;
-        html += `<b>ฝั่ง${label} (${neighbor.standId}):</b> ${oAc.Model}<br>`;
-        
-        // แสดงส่วนที่ใกล้กันที่สุด
-        html += `<span style="font-size:0.85em; color:#aaa;">⚠️ จุดที่ใกล้กันที่สุด: ${minSep.labelA} ↔ ${minSep.labelB}</span><br>`;
-        html += `ระยะจอดนิ่ง (Closest Gap): <b style="color:${staticGap < rule.MinClearance ? 'red' : 'lime'}">${staticGap.toFixed(2)}m</b> (Req ${rule.MinClearance}m)<br>`;
+        html += `<b>ฝั่ง${label} (${neighbor.standId}):</b> ${neighbor.model}<br>`;
+        html += `จอดนิ่ง (Static): <b style="color:${staticGap < rule.MinClearance ? 'red' : 'lime'}">${staticGap.toFixed(2)}m</b> (Req ${rule.MinClearance}m)<br>`;
         
         if (isToward) {
-            // ขณะเลี้ยว (Dynamic) คำนวณจากรัศมีเหวี่ยงปีกเทียบกับจุดที่ใกล้ที่สุดของเพื่อนบ้าน
-            const dynamicGap = neighbor.centerDist - (totalReach + oAc.Span / 2);
-            html += `<span class="formula" style="font-size:0.8em;">ขณะเลี้ยว (Dynamic): <b style="color:${dynamicGap < 0 ? 'red' : 'lime'}">${dynamicGap.toFixed(2)}m</b></span>`;
-            if(dynamicGap < 0) html += ` <small style="color:red; font-weight:bold;">[COLLISION RISK]</small>`;
+            const dynamicGap = neighbor.d - (totalReach + neighborHalfSpan);
+            html += `<span class="formula" style="font-size:0.8em;">คำนวณ: ${neighbor.d.toFixed(2)} - (${totalReach.toFixed(2)} + ${neighborHalfSpan.toFixed(2)})</span>`;
+            html += `ขณะเลี้ยว (Dynamic): <b style="color:${dynamicGap < 0 ? 'red' : 'lime'}">${dynamicGap.toFixed(2)}m</b>`;
+            if(dynamicGap < 0) html += ` <small style="color:red;">⚠️ อยู่ในแนวเหวี่ยง!</small>`;
         } else {
             html += `<span style="color:#888; font-size:0.85em;">(ไม่อยู่ในแนวเหวี่ยงจากการเลี้ยวนี้)</span>`;
         }
@@ -734,15 +655,16 @@ function updateAudit(alloc, idx) {
 
     auditHTML += `
         <div class="audit-card">
-            <b>2. ตรวจสอบ Clearance รอบข้าง (วัดจากจุดที่ใกล้ที่สุด):</b>
+            <b>2. ตรวจสอบ Clearance รอบข้าง (มุมมองนักบิน):</b>
             ${getNeighborHTML(leftN, "ซ้าย")}
             ${getNeighborHTML(rightN, "ขวา")}
         </div>
     `;
 
-    // 3. ตรวจสอบ Jet Blast
+    // 3. ตรวจสอบ Jet Blast (UI จากโค้ดแรก + Logic มุมมองนักบินจากโค้ดสอง)
     if (ac.JetBlast) {
         const jetStatus = getJetSafetyData(alloc, idx); 
+        // หัวเลี้ยวขวา(0) -> ท้ายสะบัดไปซ้ายนักบิน | หัวเลี้ยวซ้าย(1) -> ท้ายสะบัดไปขวานักบิน
         const tailSwingSide = alloc.turnMode === 0 ? "ซ้าย ⬅️" : "ขวา ➡️";
         const tailDist = ac.Length - ac.NoseToPivot; 
         const maxBlastReach = tailDist + ac.JetBlast; 
@@ -751,11 +673,11 @@ function updateAudit(alloc, idx) {
             <div class="audit-card" style="border-left-color: ${jetStatus.isDanger ? 'red' : '#2ecc71'}">
                 <b>3. ตรวจสอบ Jet Blast (แรงลมท้ายเครื่อง):</b><br>
                 ท้ายเครื่องเหวี่ยงไปทาง: <b style="color:var(--accent);">${tailSwingSide} ของนักบิน</b><br>
-                <span style="font-size:0.85em; color:#bbb;">(สูตร: ท้ายเครื่อง ${tailDist.toFixed(2)}m + แรงลมพ่น ${ac.JetBlast}m)</span><br>
-                <span class="formula">รัศมีลมพ่นสูงสุด (จากจุดหมุน): ${maxBlastReach.toFixed(2)}m</span>
+                <span style="font-size:0.85em; color:#bbb;">(สูตร: ความยาว ${ac.Length}m - ฐานล้อ ${ac.NoseToPivot}m = ระยะท้ายเครื่อง ${tailDist.toFixed(2)}m)</span><br>
+                <span class="formula">รัศมีลมพ่นสูงสุด (จากจุดหมุน): ${tailDist.toFixed(2)}m (ท้าย) + ${ac.JetBlast}m (ลม) = ${maxBlastReach.toFixed(2)}m</span>
                 
                 ${jetStatus.gap !== null ? 
-                    `<span class="formula">คำนวณ: [ระยะห่าง] - [รัศมีลมพ่น + ระยะปลอดภัยข้างเคียง]</span>
+                    `<span class="formula">คำนวณ: [ระยะจุดหมุนถึงลำข้างๆ] - [รัศมีลมพ่นสูงสุด + ครึ่งปีกข้างเคียง]</span>
                      <b style="color:${jetStatus.isDanger ? 'red' : 'lime'}; font-size:1.1em;">
                         คงเหลือระยะปลอดภัยสุทธิ: ${jetStatus.gap.toFixed(2)} เมตร
                      </b>` 
@@ -765,7 +687,7 @@ function updateAudit(alloc, idx) {
                 <div class="res-box" style="background:${jetStatus.isDanger ? 'rgba(231,76,60,0.2)' : 'rgba(46,204,113,0.2)'}; 
                                            color:${jetStatus.isDanger ? 'red' : '#2ecc71'}; 
                                            border-color:${jetStatus.isDanger ? 'red' : '#2ecc71'}; font-size:1rem; padding:8px; margin-top:10px; border-radius:4px; border:1px solid;">
-                    สถานะ Jet Blast: ${jetStatus.isDanger ? '❌ อันตราย! ลมเป่าอากาศยานข้างเคียง' : '✅ ระยะลมกวาดปลอดภัย'}
+                    สถานะ Jet Blast: ${jetStatus.isDanger ? '❌ อันตราย! ลมเป่าลำข้างเคียง' : '✅ ระยะลมกวาดปลอดภัย'}
                 </div>
             </div>
         `;
